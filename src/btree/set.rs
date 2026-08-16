@@ -170,10 +170,8 @@ impl BTree{
 
 #[cfg(test)]
 mod tests {
-    use crate::btree::btree_node::BTreeNode;
     use crate::btree::common::PageId;
-    use crate::btree::internal_node::InternalNode;
-    use crate::btree::page_manager::PageManager;
+    use crate::btree::page_manager::PersistentPageManager;
     use crate::btree::test_utils::{get_empty_internal_root, get_empty_leaf_root, new_internal, new_leaf};
 
     #[test]
@@ -282,7 +280,7 @@ mod tests {
          split i1
          */
 
-        tree.page_manager = PageManager::new();
+        tree.page_manager = Box::new(PersistentPageManager::new());
 
         let root_page = new_internal(&mut tree.page_manager);
         tree.root = root_page;
@@ -341,7 +339,7 @@ mod tests {
          split i1
          */
 
-        tree.page_manager = PageManager::new();
+        tree.page_manager = Box::new(PersistentPageManager::new());
 
         let root_page = new_internal(&mut tree.page_manager);
         tree.root = root_page;

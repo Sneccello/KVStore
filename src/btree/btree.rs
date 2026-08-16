@@ -11,11 +11,11 @@ pub struct BTree{
     pub root: PageId,
     pub page_size: usize,
     pub page_size_half: usize, //TODO
-    pub page_manager: PageManager,
+    pub page_manager: Box<dyn PageManager>,
 }
 
 impl BTree{
-    pub fn new(mut page_manager: PageManager, page_size: usize) -> Self{
+    pub fn new(mut page_manager: Box<dyn PageManager>, page_size: usize) -> Self {
 
         let root = LeafNode::new();
         let root_page = page_manager.alloc_node(BTreeNode::Leaf(root));
@@ -24,7 +24,6 @@ impl BTree{
             page_size,
             page_size_half: page_size / 2,
             page_manager,
-
         }
     }
 

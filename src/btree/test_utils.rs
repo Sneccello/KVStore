@@ -3,29 +3,34 @@ use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
+use crate::btree::page_manager::PersistentPageManager;
 use crate::btree::page_manager::PageManager;
 
+pub fn new_persistent_page_manager() -> Box<dyn PageManager> {
+    Box::new(PersistentPageManager::new())
+}
+
 pub fn get_empty_leaf_root(page_size: usize) -> BTree {
-    let manager = PageManager::new();
+    let manager =new_persistent_page_manager();
     BTree::new(manager, page_size)
 }
 
 pub fn get_empty_internal_root(page_size: usize) -> BTree {
-    let manager = PageManager::new();
+    let manager = new_persistent_page_manager();
     let mut tree = BTree::new(manager, page_size);
-    tree.page_manager = PageManager::new(); //get rid of initialized pages above
+    tree.page_manager =new_persistent_page_manager(); //get rid of initialized pages above
     let internal_root = BTreeNode::Internal(InternalNode::new());
     let root_page = tree.page_manager.alloc_node(internal_root);
     tree.root = root_page;
     tree
 }
 
-pub fn new_internal(manager: &mut PageManager) -> PageId {
+pub fn new_internal(manager: &mut Box<dyn PageManager>) -> PageId {
     let node =  InternalNode::new();
     manager.alloc_node(BTreeNode::Internal(node))
 }
 
-pub fn new_leaf(manager: &mut PageManager) -> PageId {
+pub fn new_leaf(manager: &mut Box<dyn PageManager>) -> PageId {
     let node =  LeafNode::new();
     manager.alloc_node(BTreeNode::Leaf(node))
 }
@@ -44,7 +49,7 @@ pub fn get_test_tree() -> BTree {
 
      */
     let page_size = 64;
-    let mut manager = PageManager::new();
+    let mut manager = new_persistent_page_manager();
 
     let root_page_id = new_internal(&mut manager);
     let i1_page = new_internal(&mut manager);
