@@ -10,12 +10,12 @@ pub fn new_persistent_page_manager() -> Box<dyn PageManager> {
     Box::new(PersistentPageManager::new())
 }
 
-pub fn get_empty_leaf_root(page_size: usize) -> BTree {
+pub fn get_empty_leaf_root(page_size: u16) -> BTree {
     let manager =new_persistent_page_manager();
     BTree::new(manager, page_size)
 }
 
-pub fn get_empty_internal_root(page_size: usize) -> BTree {
+pub fn get_empty_internal_root(page_size: u16) -> BTree {
     let manager = new_persistent_page_manager();
     let mut tree = BTree::new(manager, page_size);
     tree.page_manager =new_persistent_page_manager(); //get rid of initialized pages above

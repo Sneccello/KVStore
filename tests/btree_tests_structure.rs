@@ -23,6 +23,7 @@ fn test_multilevel_internal_nodes_are_created(){
     tree.set(b"my16longlongkey0", b"val0").unwrap();
     assert_eq!(tree.page_manager.get_pages().len(), 1);
     tree.set(b"my20longverylongkey2", b"val2").unwrap();
-    tree.set(b"my20longverylongkey3", b"val3").unwrap();
     assert_eq!(tree.page_manager.get_pages().len(), 3);
+    tree.set(b"my20longverylongkey3", b"val3").unwrap();
+    assert_eq!(tree.page_manager.get_pages().len(), 6);
 }

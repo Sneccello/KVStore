@@ -1,9 +1,10 @@
-
+use serde::{Deserialize, Serialize};
 use crate::btree::btree_node::StorageMeta;
-use crate::btree::traits::ByteSized;
+use crate::btree::traits::SerializedSize;
 use crate::btree::common::{binary_search_key, PageId};
 
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct InternalNode{
     pub header: StorageMeta,
     pub keys: Vec<Vec<u8>>,
@@ -41,7 +42,7 @@ impl InternalNode{
 
         let mut size_diff = 0;
         for key in &keys {
-            size_diff += key.len();
+            size_diff += key.byte_size();
         }
         self.header.keys_total_size -= size_diff as u16;
         self.header.items_total_size -= (children.len() * size_of::<PageId>()) as u16;
@@ -56,7 +57,7 @@ impl InternalNode{
 
         let mut size_diff = 0;
         for key in keys.iter() {
-            size_diff += key.len();
+            size_diff += key.byte_size();
         }
 
         self.header.keys_total_size += size_diff as u16;
@@ -95,7 +96,7 @@ impl InternalNode{
 
     pub fn remove_key_child(&mut self, key_index: usize, child_index: usize) -> (Vec<u8>, PageId) {
         if child_index.abs_diff(key_index) > 1{
-            panic!("Cannot insert child with a routing key that is not theirs")
+            panic!("Cannot remove child with a routing key that is not theirs")
         }
         let key = self.keys.remove(key_index);
         let child = self.children.remove(child_index);

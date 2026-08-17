@@ -78,18 +78,26 @@ impl std::fmt::Display for BTree {
     }
 }
 
-pub trait ByteSized {
+pub trait SerializedSize {
     fn byte_size(&self) -> u16;
 }
 
-impl ByteSized for PageId {
+impl SerializedSize for PageId {
     fn byte_size(&self) -> u16 {
         size_of::<PageId>() as u16
     }
 }
 
-impl ByteSized for Vec<u8> {
+impl SerializedSize for Vec<u8> {
     fn byte_size(&self) -> u16 {
-        self.len() as u16
+        (size_of::<u64>() + self.len()) as u16
+    }
+}
+
+impl SerializedSize for &[u8] {
+    fn byte_size(&self) -> u16 {
+        //we say that storing a serialized byte array is the same as storing its length + bytes.
+        // similar to vector
+        (size_of::<u64>() + self.len()) as u16
     }
 }

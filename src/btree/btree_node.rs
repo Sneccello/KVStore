@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
 use crate::btree::common::{PageId, NULL_PAGE_ID};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
 
 
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub struct StorageMeta{
     pub next: PageId,
@@ -22,14 +24,15 @@ impl StorageMeta{
         }
     }
 
-    pub fn total_size_bytes(&self) -> usize {
+    pub fn total_size_bytes(&self) -> u16 {
 
-        self.items_total_size as usize
-            + self.keys_total_size as usize
-            + size_of::<StorageMeta>()
+        self.items_total_size
+            + self.keys_total_size
+            + (size_of::<StorageMeta>() as u16)
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum BTreeNode {
     Internal(InternalNode),
     Leaf(LeafNode)
@@ -37,13 +40,24 @@ pub enum BTreeNode {
 
 impl BTreeNode{
 
-    pub fn total_size_bytes(&self) -> usize{
+    pub fn total_size_bytes(&self) -> u16{
         match self {
             BTreeNode::Internal(node) => {
                 node.header.total_size_bytes()
             }
             BTreeNode::Leaf(node) => {
                 node.header.total_size_bytes()
+            }
+        }
+    }
+
+    pub fn key_count(&self) -> u16{
+        match self {
+            BTreeNode::Internal(node) => {
+                node.get_keys().len() as u16
+            }
+            BTreeNode::Leaf(node) => {
+                node.get_keys().len() as u16
             }
         }
     }

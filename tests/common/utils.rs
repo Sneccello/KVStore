@@ -10,7 +10,7 @@ pub fn insert_keys_values(tree: &mut BTree, keys: &Vec<Vec<u8>>, values: &Vec<Ve
     }
 }
 
-pub fn new_tree(page_size: usize) -> BTree {
+pub fn new_tree(page_size: u16) -> BTree {
     let page_manager = new_persistent_page_manager();
     BTree::new(page_manager, page_size)
 }

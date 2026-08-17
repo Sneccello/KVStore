@@ -6,7 +6,7 @@ use crate::common::utils::{insert_keys_values, new_tree, shuffle};
 
 #[test]
 fn test_btree_insert() {
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     tree.set(b"key1", b"value1").unwrap();
     tree.set(b"key2", b"value2").unwrap();
@@ -21,7 +21,7 @@ fn test_btree_insert() {
 
 #[test]
 fn test_btree_overwrite(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     tree.set(b"key1", b"value1").unwrap();
     tree.set(b"key1", b"value2").unwrap();
@@ -32,7 +32,7 @@ fn test_btree_overwrite(){
 
 #[test]
 fn test_btree_delete(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     tree.set(b"key1", b"value1").unwrap();
     tree.delete(b"key1").unwrap();
@@ -44,7 +44,7 @@ fn test_btree_delete(){
 
 #[test]
 fn test_btree_delete_non_existing(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     tree.set(b"key1", b"value1").unwrap();
     tree.delete(b"key1").unwrap();
@@ -65,7 +65,7 @@ fn test_btree_delete_non_existing(){
 
 #[test]
 fn test_btree_delete_interleaved(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     let items = 100;
     let keys = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
@@ -94,7 +94,7 @@ fn test_btree_delete_interleaved(){
 
 #[test]
 fn test_btree_delete_reversed(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     let items = 100;
     let keys = (0..items)
@@ -124,7 +124,7 @@ fn test_btree_delete_reversed(){
 }
 #[test]
 fn test_btree_delete_random(){
-    let mut tree = new_tree(64);
+    let mut tree = new_tree(96);
 
     let items = 100;
     let mut keys = (0..items)

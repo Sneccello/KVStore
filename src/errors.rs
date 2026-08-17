@@ -5,7 +5,7 @@ use crate::btree::common::PageId;
 #[derive(Debug)]
 pub enum KvError{
     KeyNotFound(Vec<u8>),
-    IoError(io::Error),
+    IoError(String),
     CorruptedData(String),
     PageNotFound(PageId),
     InvalidPageRequest(Vec<PageId>),

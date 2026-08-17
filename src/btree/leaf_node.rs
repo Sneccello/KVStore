@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
 use crate::btree::btree_node::StorageMeta;
-use crate::btree::traits::ByteSized;
+use crate::btree::traits::SerializedSize;
 use crate::btree::common::binary_search_key;
 use crate::errors::KvError::KeyNotFound;
 use crate::errors::KvResult;
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LeafNode{
     pub header: StorageMeta,
     pub keys: Vec<Vec<u8>>,
@@ -26,10 +28,14 @@ impl LeafNode{
         let index = binary_search_key(&key, &self.keys);
         match index {
             Ok(idx) => {
-                let new_size = value.len();
+                let new_size = value.byte_size();
                 let old_value = std::mem::replace(&mut self.values[idx], value.to_vec());
-                self.header.items_total_size += (new_size - old_value.len()) as u16;
-
+                let old_size = old_value.byte_size();
+                if new_size >= old_size {
+                    self.header.items_total_size += new_size - old_size;
+                } else {
+                    self.header.items_total_size -= old_size - new_size;
+                }
             },
             Err(idx) => {
                 self.insert_key_value(idx, key.to_vec(), idx, value.to_vec());
@@ -51,12 +57,12 @@ impl LeafNode{
 
         let mut key_size_diff = 0;
         for key in &keys {
-            key_size_diff += key.len();
+            key_size_diff += key.byte_size();
         }
 
         let mut values_size_diff = 0;
         for value in &values {
-            values_size_diff += value.len();
+            values_size_diff += value.byte_size();
         }
         self.header.keys_total_size -= key_size_diff as u16;
         self.header.items_total_size -= values_size_diff as u16;
@@ -94,7 +100,7 @@ impl LeafNode{
 
     fn insert_key_value(&mut self, key_index: usize, key: Vec<u8>, value_index: usize, value: Vec<u8>) {
         if value_index.abs_diff(key_index) > 1{
-            panic!("Cannot insert child with a routing key that is not theirs")
+            panic!("Cannot insert value with a key that is not theirs")
         }
 
         self.header.keys_total_size += key.byte_size();
@@ -104,7 +110,7 @@ impl LeafNode{
     }
     fn remove_key_value(&mut self, key_index: usize, value_index: usize) -> (Vec<u8>, Vec<u8>) {
         if value_index.abs_diff(key_index) > 1{
-            panic!("Cannot insert child with a routing key that is not theirs")
+            panic!("Cannot remove value with a key that is not theirs")
         }
 
         let key = self.keys.remove(key_index);
