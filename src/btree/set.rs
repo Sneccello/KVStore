@@ -53,12 +53,12 @@ impl BTree{
                         let old_val_size = old_val.byte_size();
                         let new_val_size = value.byte_size();
                         if new_val_size > old_val_size {
-                            leaf.header.total_size_bytes() + (new_val_size - old_val_size) > self.page_size
+                            leaf.header.total_size_bytes() + (new_val_size - old_val_size) > self.node_fat_limit_bytes
                         } else {
                             false
                         }
                     } else {
-                        key.byte_size() + value.byte_size() + child.total_size_bytes() > self.page_size
+                        key.byte_size() + value.byte_size() + child.total_size_bytes() > self.node_fat_limit_bytes
                     }
                 }
                 _ => unreachable!(),
@@ -68,7 +68,7 @@ impl BTree{
             }
         }else{
             let additional_bytes = key.byte_size() + size_of::<PageId>() as u16;
-            if additional_bytes + child.total_size_bytes() > self.page_size {
+            if additional_bytes + child.total_size_bytes() > self.node_fat_limit_bytes {
                 self.split_internal(parent_page, child_page, child_idx)?;
             }
         }
@@ -87,16 +87,16 @@ impl BTree{
                         let old_val_size = old_val.byte_size();
                         let new_val_size = value.byte_size();
                         if new_val_size > old_val_size {
-                            leaf.header.total_size_bytes() + (new_val_size - old_val_size) > self.page_size
+                            leaf.header.total_size_bytes() + (new_val_size - old_val_size) > self.node_fat_limit_bytes
                         } else {
                             false
                         }
                     } else {
-                        leaf.header.total_size_bytes() + key.byte_size() + value.byte_size() > self.page_size
+                        leaf.header.total_size_bytes() + key.byte_size() + value.byte_size() > self.node_fat_limit_bytes
                     }
                 }
                 BTreeNode::Internal(internal) => {
-                    internal.header.total_size_bytes() + key.byte_size() + (size_of::<PageId>() as u16) > self.page_size
+                    internal.header.total_size_bytes() + key.byte_size() + (size_of::<PageId>() as u16) > self.node_fat_limit_bytes
                 }
             };
 
@@ -144,7 +144,7 @@ impl BTree{
                 let mut size = (size_of::<StorageMeta>() + size_of::<PageId>()) as u16;
                 let mut index = 0;
                 let child_keys = child.get_keys();
-                while (size < self.page_size_half || index <= 1) && index < n_keys - 1 {
+                while (size < self.node_thin_limit_bytes || index <= 1) && index < n_keys - 1 {
                     size += child_keys[index].byte_size() + (size_of::<PageId>() as u16);
                     index += 1;
                 }
@@ -182,7 +182,7 @@ impl BTree{
             } else {
                 let mut size = size_of::<StorageMeta>() as u16;
                 let mut index = 0;
-                while (size < self.page_size_half || index < 1) && index < keys - 1 {
+                while (size < self.node_thin_limit_bytes || index < 1) && index < keys - 1 {
                     let (key, value) = child.get_key_value_by_index(index);
                     size += key.byte_size();
                     size += value.byte_size();
@@ -211,9 +211,9 @@ impl BTree{
 
 #[cfg(test)]
 mod tests {
-    use crate::btree::common::PageId;
+    use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
     use crate::btree::page_manager::PersistentPageManager;
-    use crate::btree::test_utils::{get_empty_internal_root, get_empty_leaf_root, new_internal, new_leaf};
+    use crate::btree::test_utils::{get_empty_internal_root, get_empty_leaf_root, new_internal, new_leaf, new_persistent_page_manager};
 
     #[test]
     fn test_first_set_in_root() {
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_internal_node_split(){
-        let mut tree = get_empty_leaf_root(64);
+        let mut tree = get_empty_internal_root(64);
 
         /*
              root [k6]                   root [k1, k6]
@@ -285,10 +285,6 @@ mod tests {
          split i1
          */
 
-        tree.page_manager = Box::new(PersistentPageManager::new());
-
-        let root_page = new_internal(&mut tree.page_manager);
-        tree.root = root_page;
 
         let i1_page = new_internal(&mut tree.page_manager);
         let i2_page = new_internal(&mut tree.page_manager);
@@ -333,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_leaf_node_split(){
-        let mut tree = get_empty_leaf_root(96);
+        let mut tree = get_empty_internal_root(96);
 
         /*
              root [k6]                   root [k1, k6]
@@ -344,10 +340,6 @@ mod tests {
          split i1
          */
 
-        tree.page_manager = Box::new(PersistentPageManager::new());
-
-        let root_page = new_internal(&mut tree.page_manager);
-        tree.root = root_page;
 
         let l1_page = new_leaf(&mut tree.page_manager);
         let l2_page = new_leaf(&mut tree.page_manager);

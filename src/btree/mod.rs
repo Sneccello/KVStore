@@ -8,6 +8,6 @@ mod traits;
 mod delete;
 mod set;
 pub mod test_utils;
-mod file_utils;
+pub mod file_utils;
 
 pub use btree::BTree;

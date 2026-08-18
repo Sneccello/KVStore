@@ -1,12 +1,14 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
-
+use std::fs::{write, File, OpenOptions};
+use std::path::Path;
+use tempfile::tempfile;
 use crate::btree::btree_node::{BTreeNode};
 use crate::btree::common::PageId;
-use crate::btree::file_utils::write_leaf_node;
+use crate::btree::file_utils::{write_node};
 use crate::errors::{KvError, KvResult};
 
-pub trait PageManager {
+pub trait PageManager : Send{
     fn get_node(&self, page: PageId) -> KvResult<&BTreeNode>;
     fn get_node_mut(&mut self, page: PageId) -> KvResult<&mut BTreeNode>;
 
@@ -27,6 +29,7 @@ pub struct PersistentPageManager{
     free_list: BinaryHeap<Reverse<PageId>>,
     dirty_pages: Vec<PageId>,
     block_size: u16,
+    file: File,
 }
 
 impl PageManager for PersistentPageManager{
@@ -88,21 +91,17 @@ impl PageManager for PersistentPageManager{
         let collection : Vec<PageId> = self.dirty_pages.drain(..).collect();
         for page in collection{
             let offset = self.get_block_offset(page);
-            match self.pages.get(&page){
-                Some(BTreeNode::Internal(node)) => {
-                    //write_internal_node(page, node)?
+            let node = self.pages.get(&page);
+            match node {
+                Some(node) => {
+                    write_node(&mut self.file, offset, &node)?;
                 },
-                Some(BTreeNode::Leaf(node)) => {
-                    //write_leaf_node(page, node)?
-                }
                 None => {
                     return Err(KvError::PageNotFound(page));
                 }
             }
-
         }
-
-        Ok(())
+        self.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))
     }
 
 }
@@ -110,13 +109,33 @@ impl PageManager for PersistentPageManager{
 
 impl PersistentPageManager{
 
-    pub fn new() -> PersistentPageManager {
+    pub fn new(file_path: &str, block_size: u16) -> PersistentPageManager {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(file_path)
+            .unwrap();
+
         Self{
             next_free_page_id: 0,
             pages: HashMap::new(),
             free_list: BinaryHeap::new(),
             dirty_pages: Vec::new(),
-            block_size: 1<<12, //TODO param
+            block_size,
+            file,
+        }
+    }
+
+    pub fn new_with_temp_file(block_size: u16) -> PersistentPageManager {
+        let mut file = tempfile().unwrap();
+        Self{
+            next_free_page_id: 0,
+            pages: HashMap::new(),
+            free_list: BinaryHeap::new(),
+            dirty_pages: Vec::new(),
+            block_size,
+            file,
         }
     }
 

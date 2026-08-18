@@ -8,8 +8,9 @@ use crate::btree::test_utils::get_test_tree;
 const PAGE_SIZE: usize = 64;
 fn main() {
     println!("Hello, world!");
-    let page_manager = PersistentPageManager::new();
+    let page_manager = PersistentPageManager::new_with_temp_file(96);
     let tree = get_test_tree();
+    
 
     println!("{}", tree)
 }

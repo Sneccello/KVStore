@@ -2,6 +2,8 @@
 pub type PageId = u64;
 pub const NULL_PAGE_ID: u64 = u64::MAX;
 
+pub const PAGE_SIZE_PREFIX_BYTES : u16 = 2;
+
 #[repr(u8)]
 pub enum NodeType {
     Internal = 1,

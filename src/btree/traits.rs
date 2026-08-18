@@ -18,7 +18,7 @@ impl StorageEngine for BTree {
     }
 
     fn sync(&mut self) -> KvResult<()> {
-        todo!()
+        self.page_manager.sync()
     }
 }
 

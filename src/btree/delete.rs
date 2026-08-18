@@ -24,7 +24,7 @@ impl BTree{
 
                     let child = self.page_manager.get_node(child_page)?;
 
-                    if child.total_size_bytes() > self.page_size_half {
+                    if child.total_size_bytes() > self.node_thin_limit_bytes {
                         prev_node_page = Some(curr_page);
                         prev_child_idx = Some(child_index);
                         curr_page = child_page;
@@ -69,7 +69,7 @@ impl BTree{
         if child_index > 0 {
             let prev_page_id = parent.get_child_by_index(child_index-1);
             let prev = self.page_manager.get_node(prev_page_id)?;
-            if prev.total_size_bytes() > self.page_size_half && prev.key_count() > 2 {
+            if prev.total_size_bytes() > self.node_thin_limit_bytes && prev.key_count() > 2 {
                 return Ok(Some((prev_page_id.clone(), true)))
             }
         }
@@ -78,7 +78,7 @@ impl BTree{
         if child_index < n_children - 1 {
             let next_page_id = parent.get_child_by_index(child_index+1);
             let next = self.page_manager.get_node(next_page_id)?;
-            if next.total_size_bytes() > self.page_size_half && next.key_count() > 2{
+            if next.total_size_bytes() > self.node_thin_limit_bytes && next.key_count() > 2{
                 return Ok(Some((next_page_id.clone(), false)))
             }
         }

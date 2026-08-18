@@ -4,7 +4,7 @@ use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(C)]
 pub struct StorageMeta{
     pub next: PageId,

@@ -1,24 +1,26 @@
 use crate::btree::BTree;
 use crate::btree::btree_node::BTreeNode;
-use crate::btree::common::PageId;
+use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
 use crate::btree::page_manager::PersistentPageManager;
 use crate::btree::page_manager::PageManager;
 
-pub fn new_persistent_page_manager() -> Box<dyn PageManager> {
-    Box::new(PersistentPageManager::new())
+pub fn new_persistent_page_manager(page_size: u16) -> Box<dyn PageManager> {
+    //for now we add the prefix so the tests can focus on the useful page size
+    // without the additional meta for node size as a prefix
+    Box::new(PersistentPageManager::new_with_temp_file(page_size+PAGE_SIZE_PREFIX_BYTES))
 }
 
 pub fn get_empty_leaf_root(page_size: u16) -> BTree {
-    let manager =new_persistent_page_manager();
+    let manager = new_persistent_page_manager(page_size);
     BTree::new(manager, page_size)
 }
 
 pub fn get_empty_internal_root(page_size: u16) -> BTree {
-    let manager = new_persistent_page_manager();
+    let manager = new_persistent_page_manager(page_size);
     let mut tree = BTree::new(manager, page_size);
-    tree.page_manager =new_persistent_page_manager(); //get rid of initialized pages above
+    tree.page_manager =new_persistent_page_manager(page_size); //get rid of initialized pages above
     let internal_root = BTreeNode::Internal(InternalNode::new());
     let root_page = tree.page_manager.alloc_node(internal_root);
     tree.root = root_page;
@@ -49,7 +51,7 @@ pub fn get_test_tree() -> BTree {
 
      */
     let page_size = 64;
-    let mut manager = new_persistent_page_manager();
+    let mut manager = new_persistent_page_manager(page_size);
 
     let root_page_id = new_internal(&mut manager);
     let i1_page = new_internal(&mut manager);

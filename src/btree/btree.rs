@@ -1,6 +1,6 @@
 use crate::btree::btree_node::{BTreeNode, StorageMeta};
 use crate::btree::traits::SerializedSize;
-use crate::btree::common::PageId;
+use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
 use crate::errors::KvResult;
@@ -9,20 +9,20 @@ use crate::btree::page_manager::PageManager;
 
 pub struct BTree{
     pub root: PageId,
-    pub page_size: u16,
-    pub page_size_half: u16, //TODO
+    pub node_fat_limit_bytes: u16,
+    pub node_thin_limit_bytes: u16, //TODO
     pub page_manager: Box<dyn PageManager>,
 }
 
 impl BTree{
-    pub fn new(mut page_manager: Box<dyn PageManager>, page_size: u16) -> Self {
+    pub fn new(mut page_manager: Box<dyn PageManager>, useful_page_size: u16) -> Self {
 
         let root = LeafNode::new();
         let root_page = page_manager.alloc_node(BTreeNode::Leaf(root));
         BTree{
             root: root_page,
-            page_size,
-            page_size_half: page_size / 2,
+            node_fat_limit_bytes: useful_page_size,
+            node_thin_limit_bytes: useful_page_size / 2,
             page_manager,
         }
     }
