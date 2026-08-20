@@ -1,27 +1,11 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
-use std::fs::{write, File, OpenOptions};
-use std::path::Path;
-use tempfile::tempfile;
-use crate::btree::btree_node::{BTreeNode};
+use std::fs::{File, OpenOptions};
+use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
-use crate::btree::file_utils::{write_node};
+use crate::btree::page_managers::file_utils::write_node;
+use crate::btree::page_managers::page_manager::PageManager;
 use crate::errors::{KvError, KvResult};
-
-pub trait PageManager : Send{
-    fn get_node(&self, page: PageId) -> KvResult<&BTreeNode>;
-    fn get_node_mut(&mut self, page: PageId) -> KvResult<&mut BTreeNode>;
-
-    fn get_three_mut(&mut self, a: PageId, b: PageId, c: PageId) -> KvResult<(&mut BTreeNode, &mut BTreeNode, &mut BTreeNode)>;
-
-    fn alloc_node(&mut self, node: BTreeNode) -> PageId;
-
-    fn get_pages(&self) -> &HashMap<PageId, BTreeNode>;
-
-    fn delete(&mut self, page: PageId) -> KvResult<()>;
-
-    fn sync(&mut self) -> KvResult<()>;
-}
 
 pub struct PersistentPageManager{
     next_free_page_id: PageId,
@@ -30,6 +14,43 @@ pub struct PersistentPageManager{
     dirty_pages: Vec<PageId>,
     block_size: u16,
     file: File,
+}
+
+impl PersistentPageManager{
+
+    pub fn new(file_path: &str, block_size: u16) -> PersistentPageManager {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(file_path)
+            .unwrap();
+
+        Self{
+            next_free_page_id: 0,
+            pages: HashMap::new(),
+            free_list: BinaryHeap::new(),
+            dirty_pages: Vec::new(),
+            block_size,
+            file,
+        }
+    }
+
+    pub fn new_with_temp_file(block_size: u16) -> PersistentPageManager {
+        let mut file = tempfile::tempfile().unwrap();
+        Self{
+            next_free_page_id: 0,
+            pages: HashMap::new(),
+            free_list: BinaryHeap::new(),
+            dirty_pages: Vec::new(),
+            block_size,
+            file,
+        }
+    }
+
+    fn get_block_offset(&self, page_id: PageId) -> u64{
+        (self.block_size as u64) * (page_id as u64)
+    }
 }
 
 impl PageManager for PersistentPageManager{
@@ -105,43 +126,3 @@ impl PageManager for PersistentPageManager{
     }
 
 }
-
-
-impl PersistentPageManager{
-
-    pub fn new(file_path: &str, block_size: u16) -> PersistentPageManager {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(file_path)
-            .unwrap();
-
-        Self{
-            next_free_page_id: 0,
-            pages: HashMap::new(),
-            free_list: BinaryHeap::new(),
-            dirty_pages: Vec::new(),
-            block_size,
-            file,
-        }
-    }
-
-    pub fn new_with_temp_file(block_size: u16) -> PersistentPageManager {
-        let mut file = tempfile().unwrap();
-        Self{
-            next_free_page_id: 0,
-            pages: HashMap::new(),
-            free_list: BinaryHeap::new(),
-            dirty_pages: Vec::new(),
-            block_size,
-            file,
-        }
-    }
-
-    fn get_block_offset(&self, page_id: PageId) -> u64{
-        (self.block_size as u64) * (page_id as u64)
-    }
-}
-
-

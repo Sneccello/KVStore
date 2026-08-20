@@ -59,7 +59,7 @@ impl std::fmt::Display for BTree {
                         let k = String::from_utf8(key.to_vec()).unwrap();
                         let v = String::from_utf8(value.to_vec()).unwrap();
                         let repr = format!("{}->{}", k, v);
-                        let ancestors = if(depth<=1 || ! is_last_child)
+                        let ancestors = if depth<=1 || ! is_last_child
                         {
                             format!("|{}", space).repeat(depth)
                         }else{

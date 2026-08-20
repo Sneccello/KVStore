@@ -3,8 +3,8 @@ use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
-use crate::btree::page_manager::PersistentPageManager;
-use crate::btree::page_manager::PageManager;
+use crate::btree::page_managers::persistent_page_manager::PersistentPageManager;
+use crate::btree::page_managers::page_manager::PageManager;
 
 pub fn new_persistent_page_manager(page_size: u16) -> Box<dyn PageManager> {
     //for now we add the prefix so the tests can focus on the useful page size
@@ -63,16 +63,16 @@ pub fn get_test_tree() -> BTree {
     //28 bytes is 2x14 byte key values where a key is 6 bytes
 
     //internal nodes
-    for (page, internal_page_idx) in [i1_page, i2_page, i3_page].iter().zip((0..3)){
+    for (page, internal_page_idx) in [i1_page, i2_page, i3_page].iter().zip(0..3){
 
         let mut last_leaf_key = None;
-        for leaf_index in (0..3){
+        for leaf_index in 0..3{
             let leaf_page = new_leaf(&mut manager);
             let node = manager.get_node_mut(page.clone()).unwrap().as_internal_mut();
             node.push_child(leaf_page);
 
             let child = manager.get_node_mut(leaf_page).unwrap().as_leaf_mut();
-            for kv_index in (0..5){
+            for kv_index in 0..5{
                 let entry_id = internal_page_idx*15 + leaf_index*5 + kv_index;
                 let key = format!("key{:0>3}", entry_id).as_bytes().to_vec();
                 let value = format!("val{:0>3}", entry_id).as_bytes().to_vec();

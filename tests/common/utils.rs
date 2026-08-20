@@ -1,7 +1,5 @@
 use kv_store::btree::BTree;
-use kv_store::btree::page_manager::PageManager;
 use kv_store::btree::test_utils::new_persistent_page_manager;
-use kv_store::errors::KvResult;
 
 pub fn insert_keys_values(tree: &mut BTree, keys: &Vec<Vec<u8>>, values: &Vec<Vec<u8>>) {
 

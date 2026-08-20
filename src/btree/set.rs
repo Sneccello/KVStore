@@ -212,7 +212,7 @@ impl BTree{
 #[cfg(test)]
 mod tests {
     use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
-    use crate::btree::page_manager::PersistentPageManager;
+    use crate::btree::page_managers::persistent_page_manager::PersistentPageManager;
     use crate::btree::test_utils::{get_empty_internal_root, get_empty_leaf_root, new_internal, new_leaf, new_persistent_page_manager};
 
     #[test]

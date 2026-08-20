@@ -1,6 +1,5 @@
 mod common;
 
-use kv_store::engine::StorageEngine;
 use kv_store::errors::KvError;
 use crate::common::utils::{insert_keys_values, new_tree, shuffle};
 

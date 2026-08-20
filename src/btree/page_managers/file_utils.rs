@@ -43,7 +43,7 @@ pub fn read_node(file: &mut File, offset: u64) -> KvResult<BTreeNode> {
 mod tests {
     use tempfile::tempfile;
     use crate::btree::btree_node::BTreeNode;
-    use crate::btree::file_utils::{read_node, write_node};
+    use crate::btree::page_managers::file_utils::{read_node, write_node};
     use crate::btree::internal_node::InternalNode;
     use crate::btree::leaf_node::LeafNode;
 
