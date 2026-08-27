@@ -4,71 +4,113 @@ use axum::{
     routing::put,
     Router,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use axum::response::IntoResponse;
 use axum::routing::get;
+use axum::routing::delete;
 use kv_store::btree::BTree;
-use kv_store::btree::page_manager::PersistentPageManager;
+use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PersistentPageManager};
 use kv_store::engine::StorageEngine;
+use kv_store::errors::KvResult;
+
+#[derive(Clone)]
+enum DurabilityMode {
+    AlwaysSync,
+    PeriodicSync,
+}
 
 #[derive(Clone)]
 struct AppState {
-    engine: Arc<Mutex<dyn StorageEngine + Send>>
+    engine: Arc<dyn StorageEngine>,
+    durability_mode: DurabilityMode
+}
+
+fn maybe_sync(engine: &Arc<dyn StorageEngine>, durability_mode: DurabilityMode) -> KvResult<()> {
+    match durability_mode {
+        DurabilityMode::AlwaysSync => {
+            engine.sync()
+        },
+        DurabilityMode::PeriodicSync => {
+            Ok(())
+        }
+    }
 }
 
 async fn set_handler(
     State(state): State<AppState>,
     Path(key): Path<String>,
     body: String,
-) -> StatusCode {
-    let mut engine = match state.engine.lock(){
-        Ok(guard) => guard,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
+) -> impl IntoResponse {
 
-    if let Err(_) = engine.set(key.as_bytes(), body.as_bytes()) {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+
+    if let Err(err) = state.engine.set(key.as_bytes(), body.as_bytes()) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
-
-    if let Err(_) = engine.sync() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+    let post_res = maybe_sync(&state.engine, state.durability_mode);
+    if let Err(err) = post_res {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
-
-    StatusCode::OK
+    (StatusCode::OK, "".into())
 }
 
 async fn get_handler(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> impl IntoResponse {
-    let engine = match state.engine.lock() {
-        Ok(guard) => guard,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-    let result = engine.get(key.as_bytes());
+
+    let result = state.engine.get(key.as_bytes());
 
     match result {
-        Ok(Some(value)) => (StatusCode::OK, value).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Some(value)) => (StatusCode::OK, String::from_utf8(value).unwrap()),
+        Ok(None) => (StatusCode::NOT_FOUND, "".into()),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
     }
+}
+
+async fn delete_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> impl IntoResponse {
+
+    if let Err(err) = state.engine.delete(key.as_bytes()) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+    }
+
+    let post_res = maybe_sync(&state.engine, state.durability_mode);
+    if let Err(err) = post_res {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+    }
+
+    (StatusCode::OK, "".into())
+
 }
 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    let durability_mode = DurabilityMode::AlwaysSync;
+
     let page_size = 4096;
-    let page_manager = PersistentPageManager::new("kv.db", page_size);
-    let tree = BTree::new(Box::new(page_manager),page_size);
+    let page_manager = Arc::new(PersistentPageManager::new("kv.db", page_size));
+    let tree = BTree::new(page_manager,page_size);
+
+
+    /*if let DurabilityMode::PeriodicSync = durability_mode {
+        tokio::task::spawn(async move {
+            syncing_loop()
+        })
+    }*/
 
     let state = AppState{
-        engine: Arc::new(Mutex::new(tree))
+        engine: Arc::new(tree),
+        durability_mode
     };
 
     let app = Router::new()
         .route("/kv/{key}", put(set_handler))
         .route("/kv/{key}", get(get_handler))
+        .route("/kv/{key}", delete(delete_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;

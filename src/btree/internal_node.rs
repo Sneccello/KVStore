@@ -85,7 +85,7 @@ impl InternalNode{
 
     pub fn insert_key_child(&mut self, key_index: usize, key: Vec<u8>, child_index: usize, child: PageId) {
         if child_index.abs_diff(key_index) > 1{
-            panic!("Cannot insert child with a routing key that is not theirs")
+            panic!("Cannot insert child with a routing key that is not theirs key:{key_index} and child:{child_index}")
         }
         let key_len = key.byte_size();
         self.keys.insert(key_index, key);

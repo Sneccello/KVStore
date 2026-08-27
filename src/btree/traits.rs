@@ -5,7 +5,7 @@ use crate::engine::StorageEngine;
 use crate::errors::KvResult;
 
 impl StorageEngine for BTree {
-    fn set(&mut self, key: &[u8], value: &[u8]) -> KvResult<()> {
+    fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
         self.set(key, value)
     }
 
@@ -13,11 +13,11 @@ impl StorageEngine for BTree {
         self.get(key)
     }
 
-    fn delete(&mut self, key: &[u8]) -> KvResult<()> {
+    fn delete(&self, key: &[u8]) -> KvResult<()> {
         self.delete(key)
     }
 
-    fn sync(&mut self) -> KvResult<()> {
+    fn sync(&self) -> KvResult<()> {
         self.page_manager.sync()
     }
 }
@@ -30,12 +30,13 @@ impl std::fmt::Display for BTree {
         let dash = "_".repeat(multiplier);
         let space = " ".repeat(multiplier);
 
-        let current = self.root;
+        let current = self.root.read().unwrap().clone();
         let mut q = vec!((current, 0, true));
         while ! q.is_empty() {
             let (current, depth, is_last_child) = q.pop().unwrap();
             //println!("visiting node {}", current);
-            let node = self.page_manager.get_node(current).unwrap();
+            let mut node_lock = self.page_manager.get_node(current).unwrap();
+            let mut node = node_lock.write().unwrap();
 
             if depth == 0 {
                 println!("{}", current);
@@ -46,7 +47,7 @@ impl std::fmt::Display for BTree {
                 let structure = format!("{ancestors}{last}{repr}");
                 println!("{structure}");
             }
-            match node{
+            match &mut *node{
                 BTreeNode::Internal(node) => {
                     let (_, children) = node.get_key_children();
                     let last_child = children.first().unwrap();

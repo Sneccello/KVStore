@@ -1,92 +1,115 @@
+use std::sync::{RwLockWriteGuard};
 use crate::btree::BTree;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
-use crate::btree::internal_node::InternalNode;
-use crate::errors::KvResult;
+use crate::btree::page_managers::page_manager::PageManager;
+use crate::errors::{KvError, KvResult};
 
 impl BTree{
-    pub fn delete(&mut self, key: &[u8]) -> KvResult<()> {
-        let mut curr_page = self.root;
-        let mut prev_node_page : Option<PageId> = None;
-        let mut prev_child_idx : Option<usize> = None;
 
-        loop {
-            let node = self.page_manager.get_node(curr_page)?;
+    pub fn delete(&self, key: &[u8]) -> KvResult<()> {
+        let root_guard = self.root.write().map_err(
+            |e| KvError::LockError()
+        )?;
 
-            match node {
-                BTreeNode::Leaf(_) => {
-                    let node = self.page_manager.get_node_mut(curr_page)?.as_leaf_mut();
-                    return node.delete_key(key)
+        let current_arc = self.page_manager.get_node(*root_guard)?;
+        let current_guard = current_arc.write().map_err(|e| KvError::LockError())?;
+
+        self.recursive_delete(key, *root_guard, current_guard, true, &mut Some(root_guard) )
+    }
+
+    fn recursive_delete<'a>(&self,
+                            key: &[u8],
+                            current_page: PageId,
+                            mut current_guard: RwLockWriteGuard<'a, BTreeNode>,
+                            current_is_root: bool,
+                            root_guard: &mut Option<RwLockWriteGuard<'_, PageId>>, //TODO?
+    ) -> KvResult<()> {
+        /*
+            1.)lock child
+            2.)move to child
+            3.)release parent
+        */
+
+        match &mut *current_guard {
+            BTreeNode::Leaf(leaf_node) => {
+                leaf_node.delete_key(key)
+            }
+            BTreeNode::Internal(internal_node) => {
+                let child_index = internal_node.route_key_to_index(key);
+                let child_page = internal_node.get_child_by_index(child_index);
+                let child_arc = self.page_manager.get_node(child_page)?;
+                let mut child_guard = child_arc.write().unwrap();
+                if child_guard.total_size_bytes() > self.node_thin_limit_bytes {
+                    drop(root_guard.take());
+                    drop(current_guard);
+                    return self.recursive_delete(key, child_page, child_guard, false, root_guard);
                 }
-                BTreeNode::Internal(node) => {
-                    let child_index = node.route_key_to_index(key);
-                    let child_page = node.get_child_by_index(child_index);
 
-                    let child = self.page_manager.get_node(child_page)?;
+                let (donor_page, donor_is_prev) = if child_index > 0 {
+                    (internal_node.get_child_by_index(child_index - 1), true)
+                } else {
+                    (internal_node.get_child_by_index(child_index + 1), false)
+                };
 
-                    if child.total_size_bytes() > self.node_thin_limit_bytes {
-                        prev_node_page = Some(curr_page);
-                        prev_child_idx = Some(child_index);
-                        curr_page = child_page;
-                        continue;
+                let donor_arc = self.page_manager.get_node(donor_page)?;
+                let mut donor_guard = donor_arc.write().unwrap();
+
+                let can_donate = donor_guard.total_size_bytes() > self.node_thin_limit_bytes && donor_guard.key_count() > 2;
+
+                if can_donate {
+                    self.fill_up(&mut child_guard, &mut donor_guard, child_index, donor_is_prev, &mut current_guard)?;
+                    drop(donor_guard);
+                    drop(current_guard);
+                    return self.recursive_delete(key, child_page, child_guard, false, root_guard);
+                }else{
+                    let (mut left_guard, mut right_guard, left_page, right_page, left_idx) =
+                        if donor_is_prev {
+                            (donor_guard, child_guard, donor_page, child_page, child_index - 1)
+                        } else {
+                            (child_guard, donor_guard, child_page, donor_page, child_index)
+                        };
+
+
+                    self.merge_children(&mut left_guard, &mut right_guard, left_idx, &mut current_guard);
+
+                    self.page_manager.delete(right_page)?;
+                    drop(right_guard);
+                    let current = current_guard.as_internal_mut();
+
+                    current.remove_key_child(left_idx, left_idx+1);
+
+                    let mut next_is_root = false;
+
+                    if current_is_root && current.get_keys().is_empty(){
+                        //the current node has at least 2 keys. if its empty then it must be root
+                        drop(current_guard);
+                        self.page_manager.delete(current_page)?;
+
+                        if let Some(root_guard) = root_guard.as_mut() {
+                            **root_guard = left_page;
+                        }
+                        next_is_root = true;
+                    }else{
+                        drop(current_guard);
                     }
 
-                    let fallback_donor_index = if child_index == 0 {
-                        child_index + 1
-                    } else {
-                        child_index - 1
-                    };
+                    //TODO make sure left page is valid
+                    return self.recursive_delete(key, left_page, left_guard, next_is_root, root_guard);
 
-                    let donor_res = self.try_to_find_donor(node, child_index)?;
-                    match donor_res {
-                        Some((donor_page, donor_is_first)) => {
-                            self.fill_up(child_page, child_index, donor_page, donor_is_first, curr_page)?;
-                        }
-                        None => {
-                            let left_idx = fallback_donor_index.min(child_index);
-                            let right_idx = fallback_donor_index.max(child_index);
-                            let subtree_root = self.merge_children(left_idx, right_idx, curr_page)?;
-                            match prev_node_page{
-                                Some(prev_node_page) => {
-                                    let prev_node = self.page_manager.get_node_mut(prev_node_page)?;
-                                    let key_idx = prev_child_idx.unwrap();
-                                    prev_node.as_internal_mut().overwrite_value(key_idx, subtree_root);
-                                },
-                                None => {
-                                    self.root = subtree_root;
-                                }
-                            }
-                            curr_page = subtree_root;
-                        }
-                    }
+
+
                 }
             }
         }
+
     }
 
 
-    fn try_to_find_donor(&self, parent: &InternalNode, child_index: usize) -> KvResult<Option<(PageId, bool)>>{
-        if child_index > 0 {
-            let prev_page_id = parent.get_child_by_index(child_index-1);
-            let prev = self.page_manager.get_node(prev_page_id)?;
-            if prev.total_size_bytes() > self.node_thin_limit_bytes && prev.key_count() > 2 {
-                return Ok(Some((prev_page_id.clone(), true)))
-            }
-        }
-
-        let n_children = parent.get_keys().len() + 1;
-        if child_index < n_children - 1 {
-            let next_page_id = parent.get_child_by_index(child_index+1);
-            let next = self.page_manager.get_node(next_page_id)?;
-            if next.total_size_bytes() > self.node_thin_limit_bytes && next.key_count() > 2{
-                return Ok(Some((next_page_id.clone(), false)))
-            }
-        }
-        Ok(None)
-    }
 
 
-    fn fill_up(&mut self, thin_page: PageId, thin_child_index: usize, donor_page: PageId, donor_is_prev: bool, parent_page: PageId) -> KvResult<()> {
+    fn fill_up(&self, thin_child: &mut RwLockWriteGuard<BTreeNode>, donor_child: &mut RwLockWriteGuard<BTreeNode>,
+               thin_child_index: usize, donor_is_prev: bool, parent: &mut RwLockWriteGuard<BTreeNode>) -> KvResult<()> {
 
 
         /*
@@ -108,15 +131,13 @@ impl BTree{
         then the routing key is idx.last()
       */
 
-        let (thin_child, donor_child, parent) = self.page_manager.get_three_mut(
-            thin_page, donor_page, parent_page
-        )?;
+
         let parent = parent.as_internal_mut();
         assert_eq!(thin_child.is_leaf(), donor_child.is_leaf());
 
-        match thin_child {
+        match &mut **thin_child {
             BTreeNode::Internal(thin_child) => {
-                let donor_child = donor_child.as_internal_mut();
+                let mut donor_child = donor_child.as_internal_mut();
 
                 if donor_is_prev {
                     let parent_key_idx = thin_child_index - 1;
@@ -165,60 +186,39 @@ impl BTree{
     }
 
 
-    fn merge_children(&mut self, left_child_index: usize, right_child_index: usize, parent_page: PageId) -> KvResult<PageId>{
+    fn merge_children(&self, left_child: &mut RwLockWriteGuard<BTreeNode>, right_child: &mut RwLockWriteGuard<BTreeNode>,
+                      left_child_index: usize, parent_guard: &mut RwLockWriteGuard<BTreeNode>){
+        /*
+            merge(0,1)       merge(1,2)
+                [1,2]            [2]           [1]
+                [0] [2] [3] -> [0, 2] [3]  or  [0]  [2,3]
+                               min(d,t)          min(d,t)
 
-        assert!(left_child_index < right_child_index);
-
-        let parent = self.page_manager.get_node(parent_page)?.as_internal();
+        */
+        let parent = parent_guard.as_internal_mut();
         let pulled_down_key = parent.get_keys()[left_child_index].clone();
-        let left_page = parent.get_child_by_index(left_child_index);
-        let right_page = parent.get_child_by_index(right_child_index);
-
-        let (left, right, parent) = self.page_manager.get_three_mut(left_page, right_page, parent_page)?;
-        let parent = parent.as_internal_mut();
-        assert_eq!(left.is_leaf(), right.is_leaf());
 
 
-
-        match left {
+        match &mut **left_child {
             //TODO delete nodes/containers? can i move them
-            BTreeNode::Internal( left) => {
-                let right = right.as_internal_mut();
-                let (keys, children) = right.get_key_children_mut();
+            BTreeNode::Internal(left) => {
+                let (keys, children) = right_child.as_internal_mut().get_key_children_mut();
                 keys.insert(0, pulled_down_key);
                 left.append(keys, children);
             },
             BTreeNode::Leaf(left) => {
-                let right = right.as_leaf_mut();
-                let (keys, values) = right.get_key_values_mut();
+                let (keys, values) = right_child.as_leaf_mut().get_key_values_mut();
                 left.append(keys, values);
             }
         }
-        /*
-                        merge(0,1)       merge(1,2)
-            [1,2]            [2]           [1]
-           [0] [2] [3] -> [0, 2] [3]  or  [0]  [2,3]
-                           min(d,t)          min(d,t)
 
-         */
-        parent.remove_key_child(left_child_index, left_child_index+1);
-        let parent_is_root = self.root == parent_page;
-        let subtree_root = if parent_is_root && parent.get_keys().is_empty(){
-            self.page_manager.delete(parent_page)?;
-            left_page
-        }else{
-            parent_page
-        };
-        self.page_manager.delete(right_page)?;
-
-        Ok(subtree_root)
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use crate::btree::test_utils::{get_empty_internal_root, new_internal, new_leaf};
+    use crate::btree::test_utils::{get_empty_internal_root, get_root_page, new_internal, new_leaf};
 
 
     #[test]
@@ -227,24 +227,34 @@ mod tests {
 
         let i1_page = new_internal(&mut tree.page_manager);
         let i2_page = new_internal(&mut tree.page_manager);
-        let root = tree.page_manager.get_node_mut(tree.root).unwrap().as_internal_mut();
-        root.push_lasts(b"key6".to_vec(), i1_page);
-        root.push_child(i2_page);
+        {
+            let root_lock = tree.page_manager.get_node(get_root_page(&tree)).unwrap();
+            let mut root_guard = root_lock.write().unwrap();
+            let root_node = root_guard.as_internal_mut();
+            root_node.push_lasts(b"key6".to_vec(), i1_page);
+            root_node.push_child(i2_page);
 
-        let i1 = tree.page_manager.get_node_mut(i1_page).unwrap().as_internal_mut();
-        i1.push_lasts(b"key0".to_vec(), 00u64);
-        i1.push_child(10u64);
+            let i1_lock = tree.page_manager.get_node(i1_page).unwrap();
+            let mut i1_guard = i1_lock.write().unwrap();
+            let i1 = i1_guard.as_internal_mut();
+            i1.push_lasts(b"key0".to_vec(), 00u64);
+            i1.push_child(10u64);
 
-        let i2 = tree.page_manager.get_node_mut(i2_page).unwrap().as_internal_mut();
-        i2.push_lasts(b"key7".to_vec(), 70u64);
-        i2.push_child(80u64);
+            let i2_lock = tree.page_manager.get_node(i2_page).unwrap();
+            let mut i2_guard = i2_lock.write().unwrap();
+            let i2 = i2_guard.as_internal_mut();
+            i2.push_lasts(b"key7".to_vec(), 70u64);
+            i2.push_child(80u64);
 
-        let new_root =  tree.merge_children(0, 1, tree.root).unwrap();
-        assert_eq!(new_root, i1_page);
-        let root = tree.page_manager.get_node_mut(new_root).unwrap().as_internal_mut();
-        assert_eq!(root.keys, vec![b"key0".to_vec(), b"key6".to_vec(), b"key7".to_vec()]);
-        assert_eq!(root.children, vec![00u64, 10u64, 70u64, 80u64]);
-
+            tree.merge_children(&mut i1_guard,&mut i2_guard,0,  &mut root_guard);
+        };
+        {
+            let root_lock = tree.page_manager.get_node(i1_page).unwrap();
+            let mut root_guard = root_lock.write().unwrap();
+            let root_node = root_guard.as_internal_mut();
+            assert_eq!(root_node.keys, vec![b"key0".to_vec(), b"key6".to_vec(), b"key7".to_vec()]);
+            assert_eq!(root_node.children, vec![00u64, 10u64, 70u64, 80u64]);
+        }
     }
 
     #[test]
@@ -253,22 +263,36 @@ mod tests {
 
         let l1_page = new_leaf(&mut tree.page_manager);
         let l2_page = new_leaf(&mut tree.page_manager);
-        let root = tree.page_manager.get_node_mut(tree.root).unwrap().as_internal_mut();
-        root.push_lasts(b"key6".to_vec(), l1_page);
-        root.push_child(l2_page);
+        {
+            let root_lock = tree.page_manager.get_node(get_root_page(&tree)).unwrap();
+            let mut root_guard = root_lock.write().unwrap();
+            let root_node = root_guard.as_internal_mut();
+            root_node.push_lasts(b"key6".to_vec(), l1_page);
+            root_node.push_child(l2_page);
 
-        let l1 = tree.page_manager.get_node_mut(l1_page).unwrap().as_leaf_mut();
-        l1.push_lasts(b"key0".to_vec(), b"value0".to_vec());
+            let l1_lock = tree.page_manager.get_node(l1_page).unwrap();
+            let mut l1_guard = l1_lock.write().unwrap();
+            let l1 = l1_guard.as_leaf_mut();
+            l1.push_lasts(b"key0".to_vec(), b"value0".to_vec());
 
-        let l2 = tree.page_manager.get_node_mut(l2_page).unwrap().as_leaf_mut();
-        l2.push_lasts(b"key7".to_vec(), b"value7".to_vec());
+            let l2_lock = tree.page_manager.get_node(l2_page).unwrap();
+            let mut l2_guard = l2_lock.write().unwrap();
+            let l2 = l2_guard.as_leaf_mut();
+            l2.push_lasts(b"key7".to_vec(), b"value7".to_vec());
 
-        let new_root =  tree.merge_children(0, 1, tree.root).unwrap();
-        assert_eq!(new_root, l1_page);
+            drop(root_guard);
+            let parent_page = get_root_page(&tree);
+            let root_lock = tree.page_manager.get_node(parent_page).unwrap();
+            let mut root_guard = root_lock.write().unwrap();
+            let new_root =  tree.merge_children(&mut l1_guard,&mut l2_guard, 0, &mut root_guard);
 
-        let root = tree.page_manager.get_node_mut(new_root).unwrap().as_leaf_mut();
-        assert_eq!(root.keys, vec![b"key0".to_vec(), b"key7".to_vec()]);
-        assert_eq!(root.values, vec![b"value0".to_vec(), b"value7".to_vec()]);
+        };
+        let root_lock = tree.page_manager.get_node(l1_page).unwrap();
+        let mut root_guard = root_lock.write().unwrap();
+        let root_node = root_guard.as_leaf_mut();
+        assert_eq!(root_node.keys, vec![b"key0".to_vec(), b"key7".to_vec()]);
+        assert_eq!(root_node.values, vec![b"value0".to_vec(), b"value7".to_vec()]);
     }
-
 }
+
+//TODO test scale back to leaf?

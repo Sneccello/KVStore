@@ -1,20 +1,18 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
-use crate::errors::KvResult;
+use crate::errors::{KvError, KvResult};
 
-pub trait PageManager : Send{
-    fn get_node(&self, page: PageId) -> KvResult<&BTreeNode>;
-    fn get_node_mut(&mut self, page: PageId) -> KvResult<&mut BTreeNode>;
+pub trait PageManager: Send + Sync{
+    fn get_node(&self, page: PageId) -> KvResult<Arc<RwLock<BTreeNode>>>;
+    fn alloc_node(&self, node: BTreeNode) ->KvResult<PageId>;
 
-    fn get_three_mut(&mut self, a: PageId, b: PageId, c: PageId) -> KvResult<(&mut BTreeNode, &mut BTreeNode, &mut BTreeNode)>;
+    fn get_pages(&self) -> HashMap<PageId, Arc<RwLock<BTreeNode>>>;
 
-    fn alloc_node(&mut self, node: BTreeNode) -> PageId;
+    fn delete(&self, page: PageId) -> KvResult<()>;
 
-    fn get_pages(&self) -> &HashMap<PageId, BTreeNode>;
-
-    fn delete(&mut self, page: PageId) -> KvResult<()>;
-
-    fn sync(&mut self) -> KvResult<()>;
+    fn sync(&self) -> KvResult<()>;
+    fn mark_dirty(&self, page_id: PageId) -> KvResult<()>;
 }
 

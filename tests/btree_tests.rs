@@ -154,3 +154,51 @@ fn test_btree_delete_random(){
     }
 }
 
+#[test]
+fn test_btree_set_a_lot(){
+    let mut tree = new_tree(96);
+
+    let items = 100;
+    let mut keys = (0..items)
+        .map(|i| format!("{:04}", i).into_bytes())
+        .collect::<Vec<_>>();
+
+    shuffle(&mut keys);
+
+    let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        tree.set(key, value).unwrap();
+    }
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let got_value = tree.get(key).unwrap();
+        assert_eq!(value, &got_value.unwrap());
+    }
+}
+
+#[test]
+fn test_btree_delete_a_lot(){
+    let mut tree = new_tree(96);
+
+    let items = 100;
+    let mut keys = (0..items)
+        .map(|i| format!("{:04}", i).into_bytes())
+        .collect::<Vec<_>>();
+
+    shuffle(&mut keys);
+
+    let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
+
+    insert_keys_values(&mut tree, &keys, &values);
+
+    for key in keys.iter() {
+        tree.delete(key).unwrap();
+    }
+
+    for key in keys.iter() {
+        let got_value = tree.get(key).unwrap();
+        assert_eq!(None, got_value);
+    }
+}
+

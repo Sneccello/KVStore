@@ -1,19 +1,33 @@
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
+use std::hash::Hash;
+use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard};
+use std::time::Duration;
+use tokio::select;
+use tokio::time::interval;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
 use crate::btree::page_managers::file_utils::write_node;
 use crate::btree::page_managers::page_manager::PageManager;
 use crate::errors::{KvError, KvResult};
+use crate::errors::KvError::{LockError, PageNotFound, TreeLogicError};
+
+struct PageAllocatorData{
+    next_free_page_id: PageId,
+    free_list: BinaryHeap<Reverse<PageId>>,
+    pages: HashMap<PageId, Arc<RwLock<BTreeNode>>>,
+}
+
+struct FlushData{
+    dirty_pages: HashSet<PageId>,
+    file: File,
+}
 
 pub struct PersistentPageManager{
-    next_free_page_id: PageId,
-    pages: HashMap<PageId, BTreeNode>,
-    free_list: BinaryHeap<Reverse<PageId>>,
-    dirty_pages: Vec<PageId>,
+    allocator: RwLock<PageAllocatorData>,
+    flush_data: RwLock<FlushData>,
     block_size: u16,
-    file: File,
 }
 
 impl PersistentPageManager{
@@ -26,26 +40,29 @@ impl PersistentPageManager{
             .open(file_path)
             .unwrap();
 
+        PersistentPageManager::new_with_file(file, block_size)
+    }
+
+    fn new_with_file(file: File, block_size: u16) -> PersistentPageManager {
         Self{
-            next_free_page_id: 0,
-            pages: HashMap::new(),
-            free_list: BinaryHeap::new(),
-            dirty_pages: Vec::new(),
+            allocator: RwLock::new(
+                PageAllocatorData{
+                    next_free_page_id: 0,
+                    free_list: BinaryHeap::new(),
+                    pages: HashMap::new(),
+                }
+            ),
+            flush_data: RwLock::new(FlushData{
+                dirty_pages: HashSet::new(),
+                file,
+            }),
             block_size,
-            file,
         }
     }
 
     pub fn new_with_temp_file(block_size: u16) -> PersistentPageManager {
-        let mut file = tempfile::tempfile().unwrap();
-        Self{
-            next_free_page_id: 0,
-            pages: HashMap::new(),
-            free_list: BinaryHeap::new(),
-            dirty_pages: Vec::new(),
-            block_size,
-            file,
-        }
+        let file = tempfile::tempfile().unwrap();
+        PersistentPageManager::new_with_file(file, block_size)
     }
 
     fn get_block_offset(&self, page_id: PageId) -> u64{
@@ -55,74 +72,111 @@ impl PersistentPageManager{
 
 impl PageManager for PersistentPageManager{
 
-    fn get_node(&self, page: PageId) -> KvResult<&BTreeNode>{
-        self.pages.get(&page).ok_or_else(|| KvError::PageNotFound(page.clone()))
-    }
+    fn get_node(&self, page: PageId) -> KvResult<Arc<RwLock<BTreeNode>>>{
+        match self.allocator.read(){
+            Ok(lookup_guard) => {
+                lookup_guard.pages.get(&page).cloned()
+                    .ok_or_else(|| PageNotFound(page))
 
-    fn get_node_mut(&mut self, page: PageId) -> KvResult<&mut BTreeNode> {
-        if !self.pages.contains_key(&page) {
-            return Err(KvError::PageNotFound(page.clone()));
-        }
-        self.dirty_pages.push(page);
-        Ok(self.pages.get_mut(&page).unwrap())
-    }
-
-
-    fn get_three_mut(&mut self, a: PageId, b: PageId, c: PageId) -> KvResult<(&mut BTreeNode, &mut BTreeNode, &mut BTreeNode)>{
-        if a==b || b==c || c==a{
-            return Err(KvError::TreeLogicError("Page ids are the same for different nodes".to_string())); //TODO
+            }
+            Err(err) => {
+                Err(TreeLogicError(err.to_string()))
+            }
         }
 
-        let node_a = self.pages.get_mut(&a).ok_or_else(|| KvError::PageNotFound(a.clone()))? as *mut BTreeNode;
-        let node_b = self.pages.get_mut(&b).ok_or_else(|| KvError::PageNotFound(b.clone()))? as *mut BTreeNode;
-        let node_c = self.pages.get_mut(&c).ok_or_else(|| KvError::PageNotFound(c.clone()))?;
-        self.dirty_pages.push(a);
-        self.dirty_pages.push(b);
-        self.dirty_pages.push(c);
-        unsafe{
-            Ok((&mut *node_a, &mut *node_b, node_c))
-        }
     }
 
-    fn alloc_node(&mut self, node: BTreeNode) -> PageId {
-        let id = match self.free_list.pop(){
+
+    fn alloc_node(&self, node: BTreeNode) -> KvResult<PageId> {
+
+        let mut allocator = self.allocator.write().map_err(|e| LockError())?;
+
+        let id = match allocator.free_list.pop(){
             Some(Reverse(id)) => id,
             None => {
-                let id = self.next_free_page_id;
-                self.next_free_page_id+=1;
+                let id = allocator.next_free_page_id;
+                allocator.next_free_page_id+=1;
                 id
             }
         };
-        self.pages.insert(id, node);
-        self.dirty_pages.push(id);
-        id
+        allocator.pages.insert(id, Arc::new(RwLock::new(node)));
+
+        let mut flush_data = self.flush_data.write().map_err(|e| LockError())?;
+        flush_data.dirty_pages.insert(id);
+
+        Ok(id)
     }
 
-    fn get_pages(&self) -> &HashMap<PageId, BTreeNode>{
-        &self.pages
+    fn get_pages(&self) -> HashMap<PageId, Arc<RwLock<BTreeNode>>>{
+        let allocator = self.allocator.read().map_err(|e| LockError()).unwrap();
+        allocator.pages.clone()
     }
 
-    fn delete(&mut self, page: PageId) -> KvResult<()>{
-        self.free_list.push(Reverse(page));
+    fn delete(&self, page: PageId) -> KvResult<()>{
+
+        let mut allocator = self.allocator.write().map_err(|e| LockError())?;
+
+        allocator.pages.remove(&page);
+        allocator.free_list.push(Reverse(page));
+
         Ok(())
     }
 
-    fn sync(&mut self) -> KvResult<()>{
+    fn sync(&self) -> KvResult<()>{
 
-        let collection : Vec<PageId> = self.dirty_pages.drain(..).collect();
-        for page in collection{
+        let current_pages = {
+            let allocator = self.allocator.write().map_err(|e| LockError())?;
+            allocator.pages.clone()
+        };
+
+
+        let mut flush_data = self.flush_data.write().map_err(|e| LockError())?;
+
+        let dirty_pages : Vec<PageId> = flush_data.dirty_pages.drain().collect();
+        for page in dirty_pages{
+            if !current_pages.contains_key(&page){
+                continue;
+            }
             let offset = self.get_block_offset(page);
-            let node = self.pages.get(&page);
+
+            let node = current_pages.get(&page);
             match node {
-                Some(node) => {
-                    write_node(&mut self.file, offset, &node)?;
+                Some(node_ptr) => {
+                    let node = node_ptr.read().map_err(|e| LockError())?;
+                    write_node(&mut flush_data.file, offset, &node)?;
                 },
                 None => {
                     return Err(KvError::PageNotFound(page));
                 }
             }
         }
-        self.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))
+        flush_data.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))
+
     }
 
+    fn mark_dirty(&self, page_id: PageId) -> KvResult<()> {
+
+        match self.flush_data.write(){
+            Ok(mut flush_data) => {
+                flush_data.dirty_pages.insert(page_id);
+                Ok(())
+            },
+            Err(err) => {
+                Err(KvError::LockError())
+            }
+        }
+
+    }
+
+}
+
+pub async fn syncing_loop(manager: Arc<Mutex<PersistentPageManager>>, frequency_s: u64){
+
+    let mut ticker = interval(Duration::from_secs(frequency_s));
+
+    select!{
+        _ = ticker.tick()=>{
+            manager.lock().unwrap().sync().unwrap();
+        }
+    }
 }

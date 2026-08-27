@@ -1,5 +1,4 @@
 
-use std::io;
 use crate::btree::common::PageId;
 
 #[derive(Debug)]
@@ -10,6 +9,7 @@ pub enum KvError{
     PageNotFound(PageId),
     InvalidPageRequest(Vec<PageId>),
     TreeLogicError(String),
+    LockError(),
 }
 
 impl std::error::Error for KvError{}
@@ -23,6 +23,7 @@ impl std::fmt::Display for KvError {
             KvError::PageNotFound(page_id) => write!(f, "Page not found {}", page_id),
             KvError::InvalidPageRequest(page_vec) => write!(f, "Invalid page request {:?}", page_vec),
             KvError::TreeLogicError(msg) => write!(f, "Logic error: {}", msg),
+            KvError::LockError() => write!(f, "Lock error"),
         }
     }
 }
