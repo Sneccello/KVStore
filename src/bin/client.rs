@@ -8,7 +8,8 @@ use rand::rngs::ThreadRng;
 use tokio::time::interval;
 use reqwest::{Client, StatusCode};
 use serde::Serialize;
-use kv_store::logging::AsyncLogger;
+use kv_store::logging::{ItemLogger, MessageItem};
+use kv_store::logging::Logger;
 
 
 const MAX_KEY_LEN: usize = 128;
@@ -132,30 +133,29 @@ async fn load_store(base_url: &str, client: &Client, size: usize) -> (Vec<String
 #[tokio::main]
 async fn main() {
 
-    let data_logger = AsyncLogger::<Measurement>::new("client_data.log".into(), 10_000);
-    let msg_logger = AsyncLogger::<Measurement>::new("client_msg_data.log".into(), 10_000);
+    let data_logger = ItemLogger::<Measurement>::new("client_data.log".into(), 10_000);
+    let msg_logger = ItemLogger::<MessageItem>::new("client_messages.log".into(), 10_000);
 
     let data_logger_arc = Arc::new(data_logger);
 
     let client = Client::new();
     let initial_size = 1000;
-    let qps_increment = 100;
-    let max_qps = 20_000;
+    let qps_increment = 25;
+    let max_qps = 1800;
     let qps_tier_duration = 10;
     let read_probability = 0.6;
     let write_is_put_probability = 0.75;
 
     let base_url = "http://127.0.0.1:3000/kv";
 
-    msg_logger.log_msg("Loading store..").await;
+    println!("Loading store..");
     let (mut keys, mut values) = load_store(base_url, &client, initial_size).await;
 
     let mut key2index: HashMap<String, usize> = HashMap::from_iter(
         keys.iter().zip(0..keys.len()).map(|(k, v)| (k.clone(), v))
     );
 
-    msg_logger.log_msg("Loading store DONE").await;
-
+    println!("Loading store DONE");
 
     let mut current_qps = 1;
     let mut rng = rand::thread_rng();
@@ -224,7 +224,7 @@ async fn main() {
                             current_qps,
                             current_store_size: current_size,
                         };
-                        logger_clone.log(measurement).await
+                        logger_clone.log_item(measurement).unwrap();
                     });
                 }
             }
@@ -234,6 +234,6 @@ async fn main() {
         if current_qps > max_qps{
             break;
         }
-        msg_logger.log_msg(format!("Switched to {current_qps} QPS.").as_str()).await;
+        println!("Switched to {current_qps} QPS.")
     }
 }

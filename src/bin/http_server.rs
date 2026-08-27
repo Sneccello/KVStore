@@ -9,9 +9,12 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::routing::delete;
 use kv_store::btree::BTree;
-use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PersistentPageManager};
+use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PageManagerLogItem, PersistentPageManager};
 use kv_store::engine::StorageEngine;
 use kv_store::errors::KvResult;
+use kv_store::logging::{ItemLogger, MessageItem};
+
+pub const LOG_FOLDER: &str = "logs";
 
 #[derive(Clone)]
 enum DurabilityMode {
@@ -92,7 +95,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let durability_mode = DurabilityMode::AlwaysSync;
 
     let page_size = 4096;
-    let page_manager = Arc::new(PersistentPageManager::new("kv.db", page_size));
+
+    let pm_log_data_path = std::path::Path::new(LOG_FOLDER).join("page_manager_data.log");
+    let pm_data_path_s = pm_log_data_path.to_str().unwrap();
+    let pm_data_logger = Arc::new(ItemLogger::<PageManagerLogItem>::new(pm_data_path_s, 10_0000));
+
+    let pm_messages_path = std::path::Path::new(LOG_FOLDER).join("page_manager_messages.log");
+    let pm_message_path_s = pm_messages_path.to_str().unwrap();
+    let message_logger = Arc::new(ItemLogger::<MessageItem>::new(pm_message_path_s, 10_0000));
+
+
+
+    let page_manager = Arc::new(
+        PersistentPageManager::new("kv.db", page_size, pm_data_logger, message_logger)
+    );
     let tree = BTree::new(page_manager,page_size);
 
 

@@ -1,18 +1,28 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
+use std::marker::PhantomData;
 use std::sync::Arc;
 use chrono::Utc;
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
+use crate::errors::{KvError, KvResult};
 
-pub struct AsyncLogger<T> {
+pub trait Logger<T>: Send + Sync{
+    fn log_item(&self, item: T) -> KvResult<()>;
+}
+
+pub struct ItemLogger<T> {
     sender: mpsc::Sender<T>,
     writer: Arc<Mutex<BufWriter<File>>>,
 }
 
+#[derive(Serialize)]
+pub struct MessageItem{
+    pub msg: String, //TODO level
+}
 
-impl  <T: Serialize+Send+'static> AsyncLogger<T> {
-    pub fn new(file_path: String, buffer_capacity: usize) -> Self{
+impl <T: Serialize+Send+'static> ItemLogger<T> { //TODO refactor
+    pub fn new(file_path: &str, buffer_capacity: usize) -> Self{
         let (sender, mut receiver) = mpsc::channel::<T>(buffer_capacity);
 
         let file = OpenOptions::new().create(true).truncate(true).write(true).open(&file_path).unwrap();
@@ -41,23 +51,29 @@ impl  <T: Serialize+Send+'static> AsyncLogger<T> {
 
         Self{sender, writer: Arc::clone(&writer)}
     }
+}
+
+impl <T: Serialize+Send+Sync+'static> Logger<T> for ItemLogger<T>{
+    
+    fn log_item(&self, item: T) -> KvResult<()> {
+        self.sender.try_send(item).map_err(|e| KvError::LoggingError(e.to_string()))
+    }
+}
 
 
-    pub async fn log(&self, item: T){
-        if let Err(e) = self.sender.send(item).await {
-            eprintln!("Error sending log message: {}", e);
+pub struct NoopLogger<T>{
+    _marker: PhantomData<T>
+}
+
+impl<T> NoopLogger<T>{
+    pub fn new(_path: String, _buffer_capacity: usize) -> Self{
+        Self{
+            _marker: PhantomData,
         }
     }
-
-    pub async fn log_msg(&self, msg: &str){
-        self.writer.lock().await.write(
-            format!("{}:{}\n",
-                Utc::now().to_rfc3339(),
-                msg).as_bytes()
-        ).unwrap();
-
-        self.writer.lock().await.flush().unwrap();
-        println!("{}", msg);
-
+}
+impl <T: Serialize+Send+Sync+'static> Logger<T> for NoopLogger<T>{
+    fn log_item(&self, _item: T) -> KvResult<()> {
+        Ok(())
     }
 }

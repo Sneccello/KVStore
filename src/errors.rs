@@ -10,6 +10,7 @@ pub enum KvError{
     InvalidPageRequest(Vec<PageId>),
     TreeLogicError(String),
     LockError(),
+    LoggingError(String),
 }
 
 impl std::error::Error for KvError{}
@@ -24,6 +25,7 @@ impl std::fmt::Display for KvError {
             KvError::InvalidPageRequest(page_vec) => write!(f, "Invalid page request {:?}", page_vec),
             KvError::TreeLogicError(msg) => write!(f, "Logic error: {}", msg),
             KvError::LockError() => write!(f, "Lock error"),
+            KvError::LoggingError(msg) => write!(f, "Logging error: {}", msg),
         }
     }
 }

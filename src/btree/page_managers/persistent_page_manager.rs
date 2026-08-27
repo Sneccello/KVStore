@@ -1,11 +1,15 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::hash::Hash;
-use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock};
+use std::time;
 use std::time::Duration;
+use chrono::Utc;
+use serde::Serialize;
 use tokio::select;
 use tokio::time::interval;
+use crate::logging::{MessageItem};
+use crate::logging::{ItemLogger, Logger};
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
 use crate::btree::page_managers::file_utils::write_node;
@@ -24,15 +28,26 @@ struct FlushData{
     file: File,
 }
 
+#[derive(Serialize)]
+pub struct PageManagerLogItem {
+    syncing_timestamp: String,
+    syncing_duration: u128,
+}
+
 pub struct PersistentPageManager{
     allocator: RwLock<PageAllocatorData>,
     flush_data: RwLock<FlushData>,
     block_size: u16,
+    data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+    message_logger: Arc<dyn Logger<MessageItem>>,
 }
 
 impl PersistentPageManager{
 
-    pub fn new(file_path: &str, block_size: u16) -> PersistentPageManager {
+    pub fn new(file_path: &str, block_size: u16,
+               data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+               message_logger: Arc<dyn Logger<MessageItem>>,
+    ) -> PersistentPageManager {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -40,10 +55,13 @@ impl PersistentPageManager{
             .open(file_path)
             .unwrap();
 
-        PersistentPageManager::new_with_file(file, block_size)
+        PersistentPageManager::new_with_file(file, block_size, data_logger, message_logger)
     }
 
-    fn new_with_file(file: File, block_size: u16) -> PersistentPageManager {
+    fn new_with_file(file: File, block_size: u16,
+                     data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+                     message_logger:Arc<dyn Logger<MessageItem>>,
+    ) -> PersistentPageManager {
         Self{
             allocator: RwLock::new(
                 PageAllocatorData{
@@ -57,12 +75,17 @@ impl PersistentPageManager{
                 file,
             }),
             block_size,
+            data_logger,
+            message_logger,
         }
     }
 
-    pub fn new_with_temp_file(block_size: u16) -> PersistentPageManager {
+    pub fn new_with_temp_file(block_size: u16,
+                              data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+                              message_logger: Arc<dyn Logger<MessageItem>>,
+    ) -> PersistentPageManager {
         let file = tempfile::tempfile().unwrap();
-        PersistentPageManager::new_with_file(file, block_size)
+        PersistentPageManager::new_with_file(file, block_size, data_logger, message_logger)
     }
 
     fn get_block_offset(&self, page_id: PageId) -> u64{
@@ -124,33 +147,35 @@ impl PageManager for PersistentPageManager{
 
     fn sync(&self) -> KvResult<()>{
 
-        let current_pages = {
-            let allocator = self.allocator.write().map_err(|e| LockError())?;
-            allocator.pages.clone()
+        let start = time::Instant::now();
+        let now = Utc::now().to_rfc3339();
+
+
+        let dirty_pages = {
+            let mut flush_data = self.flush_data.write().map_err(|e| LockError())?;
+            let dirty_pages : Vec<PageId> = flush_data.dirty_pages.drain().collect();
+            dirty_pages
         };
 
-
+        let allocator = self.allocator.read().map_err(|e| LockError())?;
         let mut flush_data = self.flush_data.write().map_err(|e| LockError())?;
-
-        let dirty_pages : Vec<PageId> = flush_data.dirty_pages.drain().collect();
         for page in dirty_pages{
-            if !current_pages.contains_key(&page){
-                continue;
-            }
-            let offset = self.get_block_offset(page);
-
-            let node = current_pages.get(&page);
-            match node {
-                Some(node_ptr) => {
-                    let node = node_ptr.read().map_err(|e| LockError())?;
-                    write_node(&mut flush_data.file, offset, &node)?;
-                },
-                None => {
-                    return Err(KvError::PageNotFound(page));
-                }
+            if let Some(node_ptr) = allocator.pages.get(&page) {
+                let offset = self.get_block_offset(page);
+                let node = node_ptr.read().map_err(|e| LockError())?;
+                write_node(&mut flush_data.file, offset, &node)?;
             }
         }
-        flush_data.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))
+        flush_data.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))?;
+
+        let duration = start.elapsed();
+        self.data_logger.log_item(
+            PageManagerLogItem{
+                syncing_timestamp: now,
+                syncing_duration: duration.as_nanos(),
+            }
+        )
+
 
     }
 
@@ -170,13 +195,18 @@ impl PageManager for PersistentPageManager{
 
 }
 
-pub async fn syncing_loop(manager: Arc<Mutex<PersistentPageManager>>, frequency_s: u64){
+pub async fn syncing_loop(
+    manager: Arc<PersistentPageManager>,
+    frequency_s: u64,
+    data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+    error_logger: Arc<dyn Logger<MessageItem>>,
+){
 
     let mut ticker = interval(Duration::from_secs(frequency_s));
 
     select!{
         _ = ticker.tick()=>{
-            manager.lock().unwrap().sync().unwrap();
+            _ = manager.sync();
         }
     }
 }
