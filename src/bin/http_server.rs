@@ -5,6 +5,7 @@ use axum::{
     Router,
 };
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::routing::delete;
@@ -92,7 +93,7 @@ async fn delete_handler(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let durability_mode = DurabilityMode::AlwaysSync;
+    let durability_mode = DurabilityMode::PeriodicSync;
 
     let page_size = 4096;
 
@@ -109,14 +110,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let page_manager = Arc::new(
         PersistentPageManager::new("kv.db", page_size, pm_data_logger, message_logger)
     );
+    let pm_copy = page_manager.clone();
+    if let DurabilityMode::PeriodicSync = durability_mode {
+        tokio::task::spawn(async move {
+            syncing_loop(
+                pm_copy,
+                Duration::from_secs(10),
+            ).await
+        });
+    }
+
     let tree = BTree::new(page_manager,page_size);
 
-
-    /*if let DurabilityMode::PeriodicSync = durability_mode {
-        tokio::task::spawn(async move {
-            syncing_loop()
-        })
-    }*/
 
     let state = AppState{
         engine: Arc::new(tree),

@@ -197,16 +197,15 @@ impl PageManager for PersistentPageManager{
 
 pub async fn syncing_loop(
     manager: Arc<PersistentPageManager>,
-    frequency_s: u64,
-    data_logger: Arc<dyn Logger<PageManagerLogItem>>,
-    error_logger: Arc<dyn Logger<MessageItem>>,
+    duration: Duration,
 ){
 
-    let mut ticker = interval(Duration::from_secs(frequency_s));
-
-    select!{
+    let mut ticker = interval(duration);
+    loop {
+        select!{
         _ = ticker.tick()=>{
-            _ = manager.sync();
+            manager.sync().unwrap();
         }
+    }
     }
 }
