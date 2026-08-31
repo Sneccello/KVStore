@@ -13,7 +13,7 @@ use kv_store::logging::Logger;
 
 
 const MAX_KEY_LEN: usize = 128;
-
+pub const LOG_FOLDER: &str = "logs";
 #[derive(Serialize, PartialEq)]
 enum Method{
     Get,
@@ -30,22 +30,22 @@ impl fmt::Display for Method {
     }
 }
 
-
-#[derive(Serialize)]
-struct RequestResult{
-    request_type: String,
-    duration: Duration,
-    status: u16,
-    error_msg: Option<String>,
-    url: String,
+enum LoadType{
+    ReadDominant,
+    WriteDominant,
+    Balanced,
 }
 
 #[derive(Serialize)]
 struct Measurement{
-    request_result: RequestResult,
-    current_store_size: usize,
-    current_qps: i32
+    request_type: String,
+    duration: u128,
+    status: u16,
+    error_msg: Option<String>,
+    url: String,
+    current_qps: u32,
 }
+
 
 fn generate_string(rng: &mut ThreadRng) -> String {
     let len = rng.gen_range(1..MAX_KEY_LEN);
@@ -71,7 +71,7 @@ fn generate_key_values(dataset_size: usize) -> (Vec<String>, Vec<String>){
 }
 
 
-async fn timed_request(url: String, value: String, method: Method, client: &Client) -> RequestResult{
+async fn timed_request(url: String, value: String, method: Method, client: &Client) -> Measurement{
 
     let time = Instant::now();
     let mut error_msg = None;
@@ -107,12 +107,13 @@ async fn timed_request(url: String, value: String, method: Method, client: &Clie
         }
     };
 
-    RequestResult{
+    Measurement{
         request_type: method.to_string(),
-        duration,
+        duration: duration.as_nanos(),
         status: status.map(|c| c.as_u16()).or_else(|| Some(0)).unwrap(),
         error_msg,
         url,
+        current_qps: 0, //placeholder
     }
 
 }
@@ -133,25 +134,26 @@ async fn load_store(base_url: &str, client: &Client, size: usize) -> (Vec<String
 #[tokio::main]
 async fn main() {
 
-    let data_logger = ItemLogger::<Measurement>::new("client_data.log".into(), 10_000);
-    let msg_logger = ItemLogger::<MessageItem>::new("client_messages.log".into(), 10_000);
 
+    let log_data_path = std::path::Path::new(LOG_FOLDER).join("client_data.csv");
+    let data_path_s = log_data_path.to_str().unwrap();
+
+    let data_logger = ItemLogger::<Measurement>::new(data_path_s.into(), 1_000_000).await;
     let data_logger_arc = Arc::new(data_logger);
 
     let client = Client::new();
-    let initial_size = 1000;
-    let qps_increment = 25;
-    let max_qps = 1800;
-    let qps_tier_duration = 10;
-    let read_probability = 0.6;
-    let write_is_put_probability = 0.75;
+    let initial_size = 100_000;
+    let qps_increment = 1000;
+    let max_qps = 50_000;
+    let qps_tier_duration = 5;
+    let load_type = LoadType::ReadDominant;
 
     let base_url = "http://127.0.0.1:3000/kv";
 
     println!("Loading store..");
     let (mut keys, mut values) = load_store(base_url, &client, initial_size).await;
 
-    let mut key2index: HashMap<String, usize> = HashMap::from_iter(
+    let key2index: HashMap<String, usize> = HashMap::from_iter(
         keys.iter().zip(0..keys.len()).map(|(k, v)| (k.clone(), v))
     );
 
@@ -171,44 +173,49 @@ async fn main() {
             tokio::select! {
                 _ = ticker.tick() => {
 
-
                     let client_clone = client.clone();
                     let logger_clone = Arc::clone(&data_logger_arc);
-                    let is_read = rng.gen_bool(read_probability);
-                    let put_write = rng.gen_bool(write_is_put_probability);
 
-                    let idx = rng.gen_range(0..keys.len());
-
-
-                    let (method, key, value) = match (is_read, put_write) {
-                        (true, _) => {
+                    let (method, key, value) = match load_type{
+                        LoadType::ReadDominant => {
+                            let idx = rng.gen_range(0..keys.len());
+                            let is_read = rng.gen_bool(0.9);
+                            let method = if is_read {Method::Get} else {Method::Put};
                             let key = keys[idx].clone();
-                            let value = values[idx].clone();
-                            (Method::Get, key, value)
+                            let value = if is_read {values[idx].clone()} else {generate_string(&mut rng)};
+                            (method, key, value)
                         },
-                        (false, true) => {
-                            let key = generate_string(&mut rng);
-                            let value = generate_string(&mut rng);
-
-                            match key2index.get(&key){
-                                Some(index) => {
-                                    values[*index] = value.clone();
-                                }
-                                None => {
-                                    values.push(value.clone());
-                                    keys.push(key.clone());
-                                    key2index.insert(key.clone(), keys.len() - 1);
-                                }
-                            };
-                            (Method::Put, key, value)
+                        LoadType::WriteDominant => {
+                            let idx = rng.gen_range(0..keys.len());
+                            let is_read = rng.gen_bool(0.1);
+                            let method = if is_read {Method::Get} else {Method::Put};
+                            let method = if is_read {Method::Get} else {Method::Put};
+                            let key = keys[idx].clone();
+                            let value = if is_read {values[idx].clone()} else {generate_string(&mut rng)};
+                            (method, key, value)
                         },
-                        (false, false) => {
-                            let existing_key = keys[idx].clone();
-                            keys.remove(idx);
-                            let value = values.remove(idx);
-                            (Method::Delete, existing_key, value)
+                        LoadType::Balanced => {
+                            let idx = rng.gen_range(0..keys.len());
+                            let is_read = rng.gen_bool(0.1);
+                            let write_is_delete = rng.gen_bool(0.5);
+                            if is_read{
+                                let key = keys[idx].clone();
+                                let value = values[idx].clone();
+                                (Method::Get, key, value)
+                            }
+                            else if write_is_delete{
+                                let key = keys[idx].clone();
+                                let value = values[idx].clone();
+                                (Method::Delete, key, value)
+                            }
+                            else {
+                                let key = keys[idx].clone();
+                                let new_value  = generate_string(&mut rng);
+                                (Method::Put, key, new_value)
+                            }
                         }
                     };
+
 
                     let url = format!("{}/{}", base_url, key);
 
@@ -216,15 +223,11 @@ async fn main() {
 
                     tokio::spawn(async move {
 
-                        let record = timed_request(
+                        let mut record = timed_request(
                             url.clone(), value, method, &client_clone
                         ).await;
-                        let measurement = Measurement{
-                            request_result: record,
-                            current_qps,
-                            current_store_size: current_size,
-                        };
-                        logger_clone.log_item(measurement).unwrap();
+                        record.current_qps = current_qps;
+                        logger_clone.log_item(record).unwrap();
                     });
                 }
             }

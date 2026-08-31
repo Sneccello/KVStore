@@ -3,7 +3,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::sync::{Arc, RwLock};
 use std::time;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::Utc;
 use serde::Serialize;
 use tokio::select;
@@ -11,7 +11,7 @@ use tokio::time::interval;
 use crate::logging::{MessageItem};
 use crate::logging::{ItemLogger, Logger};
 use crate::btree::btree_node::BTreeNode;
-use crate::btree::common::PageId;
+use crate::btree::common::{get_unix_nano, PageId};
 use crate::btree::page_managers::file_utils::write_node;
 use crate::btree::page_managers::page_manager::PageManager;
 use crate::errors::{KvError, KvResult};
@@ -30,8 +30,8 @@ struct FlushData{
 
 #[derive(Serialize)]
 pub struct PageManagerLogItem {
-    syncing_timestamp: String,
-    syncing_duration: u128,
+    start_timestamp_nanos: u128,
+    duration: u128,
 }
 
 pub struct PersistentPageManager{
@@ -147,9 +147,7 @@ impl PageManager for PersistentPageManager{
 
     fn sync(&self) -> KvResult<()>{
 
-        let start = time::Instant::now();
-        let now = Utc::now().to_rfc3339();
-
+        let start = std::time::Instant::now();
 
         let dirty_pages = {
             let mut flush_data = self.flush_data.write().map_err(|e| LockError())?;
@@ -168,11 +166,11 @@ impl PageManager for PersistentPageManager{
         }
         flush_data.file.sync_data().map_err(|e| KvError::IoError(e.to_string()))?;
 
-        let duration = start.elapsed();
+
         self.data_logger.log_item(
             PageManagerLogItem{
-                syncing_timestamp: now,
-                syncing_duration: duration.as_nanos(),
+                start_timestamp_nanos: get_unix_nano(),
+                duration: start.elapsed().as_nanos(),
             }
         )
 

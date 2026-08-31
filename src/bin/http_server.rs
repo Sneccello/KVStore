@@ -10,6 +10,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::routing::delete;
 use kv_store::btree::BTree;
+use kv_store::btree::btree::BTreeLogItem;
 use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PageManagerLogItem, PersistentPageManager};
 use kv_store::engine::StorageEngine;
 use kv_store::errors::KvResult;
@@ -20,6 +21,7 @@ pub const LOG_FOLDER: &str = "logs";
 #[derive(Clone)]
 enum DurabilityMode {
     AlwaysSync,
+    NeverSync,
     PeriodicSync,
 }
 
@@ -35,6 +37,9 @@ fn maybe_sync(engine: &Arc<dyn StorageEngine>, durability_mode: DurabilityMode) 
             engine.sync()
         },
         DurabilityMode::PeriodicSync => {
+            Ok(())
+        },
+        DurabilityMode::NeverSync => {
             Ok(())
         }
     }
@@ -93,17 +98,17 @@ async fn delete_handler(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let durability_mode = DurabilityMode::PeriodicSync;
+    let durability_mode = DurabilityMode::NeverSync;
 
     let page_size = 4096;
 
-    let pm_log_data_path = std::path::Path::new(LOG_FOLDER).join("page_manager_data.log");
+    let pm_log_data_path = std::path::Path::new(LOG_FOLDER).join("page_manager_data.csv");
     let pm_data_path_s = pm_log_data_path.to_str().unwrap();
-    let pm_data_logger = Arc::new(ItemLogger::<PageManagerLogItem>::new(pm_data_path_s, 10_0000));
+    let pm_data_logger = Arc::new(ItemLogger::<PageManagerLogItem>::new(pm_data_path_s, 1_000_0000).await);
 
-    let pm_messages_path = std::path::Path::new(LOG_FOLDER).join("page_manager_messages.log");
+    let pm_messages_path = std::path::Path::new(LOG_FOLDER).join("page_manager_messages.csv");
     let pm_message_path_s = pm_messages_path.to_str().unwrap();
-    let message_logger = Arc::new(ItemLogger::<MessageItem>::new(pm_message_path_s, 10_0000));
+    let message_logger = Arc::new(ItemLogger::<MessageItem>::new(pm_message_path_s, 1_000_0000).await);
 
 
 
@@ -120,7 +125,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let tree = BTree::new(page_manager,page_size);
+    let tree_log_data_path = std::path::Path::new(LOG_FOLDER).join("tree_operations.csv");
+    let tree_data_path_s = tree_log_data_path.to_str().unwrap();
+    let tree_data_logger = Arc::new(ItemLogger::<BTreeLogItem>::new(tree_data_path_s, 1_000_000).await);
+    let tree = BTree::new(page_manager,page_size, tree_data_logger);
 
 
     let state = AppState{

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use crate::logging::{MessageItem};
-use crate::logging::{Logger, NoopLogger};
+use crate::logging::{NoopLogger};
 use crate::btree::BTree;
+use crate::btree::btree::BTreeLogItem;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::{PageId, PAGE_SIZE_PREFIX_BYTES};
 use crate::btree::internal_node::InternalNode;
@@ -19,12 +20,14 @@ pub fn new_persistent_page_manager(page_size: u16) -> Arc<dyn PageManager> {
 
 pub fn get_empty_leaf_root(page_size: u16) -> BTree {
     let manager = new_persistent_page_manager(page_size);
-    BTree::new(manager, page_size)
+    let logger = Arc::new(NoopLogger::<BTreeLogItem>::new("testlog_msgs.log".to_string(), 5));
+    BTree::new(manager, page_size, logger)
 }
 
 pub fn get_empty_internal_root(page_size: u16) -> BTree {
     let manager = new_persistent_page_manager(page_size);
-    let mut tree = BTree::new(manager, page_size);
+    let logger = Arc::new(NoopLogger::<BTreeLogItem>::new("testlog_msgs.log".to_string(), 5));
+    let mut tree = BTree::new(manager, page_size, logger);
     tree.page_manager.delete(get_root_page(&tree)).unwrap(); //get rid of initialized pages above
     let internal_root = BTreeNode::Internal(InternalNode::new());
     let root_page = tree.page_manager.alloc_node(internal_root).unwrap();

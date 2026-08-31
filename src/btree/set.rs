@@ -1,8 +1,9 @@
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use crate::btree::page_managers::page_manager::PageManager;
 use crate::btree::BTree;
+use crate::btree::btree::OperationType;
 use crate::btree::btree_node::{BTreeNode, StorageMeta};
-use crate::btree::common::PageId;
+use crate::btree::common::{PageId};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
 use crate::btree::traits::SerializedSize;
@@ -11,8 +12,9 @@ use crate::errors::KvError::{LockError, TreeLogicError};
 
 impl BTree{
 
-
+    
     pub fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
+        let start = std::time::Instant::now();
         let mut root_guard = self.root.write().map_err(|_| LockError())?;
         {
             let node_arc = self.page_manager.get_node(*root_guard)?;
@@ -25,10 +27,13 @@ impl BTree{
         let current_guard = current_arc.write().map_err(|_| LockError())?;
         drop(root_guard);
 
-        self.recursive_set(key, value, current_guard)
+        let res = self.recursive_set(key, value, current_guard);
+        self.log_operation(OperationType::Set, start.elapsed().as_nanos());
+        res
+        
     }
 
-    pub fn recursive_set(&self, key: &[u8], value: &[u8],
+    fn recursive_set(&self, key: &[u8], value: &[u8],
                          mut node_guard: RwLockWriteGuard<BTreeNode>,
 
     ) -> KvResult<()> {

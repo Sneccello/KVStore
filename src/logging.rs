@@ -1,19 +1,26 @@
-use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use tokio::fs::{File, OpenOptions};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use chrono::Utc;
+use csv::WriterBuilder;
 use serde::Serialize;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, Mutex};
+use crate::btree::common::get_unix_nano;
 use crate::errors::{KvError, KvResult};
 
 pub trait Logger<T>: Send + Sync{
     fn log_item(&self, item: T) -> KvResult<()>;
 }
 
+#[derive(Serialize)]
+struct LogRecord<T> {
+    timestamp: u128,
+    #[serde(flatten)]
+    item: T,
+}
+
 pub struct ItemLogger<T> {
-    sender: mpsc::Sender<T>,
-    writer: Arc<Mutex<BufWriter<File>>>,
+    sender: mpsc::Sender<T>
 }
 
 #[derive(Serialize)]
@@ -22,39 +29,49 @@ pub struct MessageItem{
 }
 
 impl <T: Serialize+Send+'static> ItemLogger<T> { //TODO refactor
-    pub fn new(file_path: &str, buffer_capacity: usize) -> Self{
+    pub async fn new(file_path: &str, buffer_capacity: usize) -> Self{
         let (sender, mut receiver) = mpsc::channel::<T>(buffer_capacity);
+        let path = file_path.to_string();
 
-        let file = OpenOptions::new().create(true).truncate(true).write(true).open(&file_path).unwrap();
-
-        let writer = Arc::new(Mutex::new(BufWriter::new(file)));
-        let worker_writer = Arc::clone(&writer);
         tokio::spawn(async move {
 
-            while let Some(item) = receiver.recv().await.as_mut() {
-                if let Ok(mut value) = serde_json::to_value(&item){
-                    if let Some(map) = value.as_object_mut(){
-                        map.insert(
-                            "timestamp".to_string(),
-                            serde_json::json!(Utc::now().to_rfc3339())
-                        );
-                    }
+            let file = OpenOptions::new().create(true).truncate(true).write(true).open(path).await.unwrap();
 
-                    if let Ok(mut json_line) = serde_json::to_string(&value) {
-                        json_line.push('\n');
-                        let _ = worker_writer.lock().await.write(json_line.as_bytes());
+
+            let mut writer = BufWriter::with_capacity(64 * 1024, file);
+            let mut batch = Vec::with_capacity(512);
+
+            let mut write_buf = Vec::with_capacity(64 * 1024);
+
+
+            let mut has_written_headers = false;
+
+            while receiver.recv_many(&mut batch, 512).await > 0 {
+                write_buf.clear();
+
+                {
+                    let mut csv_writer = WriterBuilder::new()
+                        .has_headers(!has_written_headers)
+                        .from_writer(&mut write_buf);
+
+                    for item in batch.drain(..) {
+                        let _ = csv_writer.serialize(item);
                     }
+                    let _ = csv_writer.flush();
                 }
+
+                has_written_headers = true;
+                let _ = writer.write_all(&write_buf).await;
             }
-            let _ = worker_writer.lock().await.flush();
+            let _ = writer.flush();
         });
 
-        Self{sender, writer: Arc::clone(&writer)}
+        Self{sender}
     }
 }
 
 impl <T: Serialize+Send+Sync+'static> Logger<T> for ItemLogger<T>{
-    
+
     fn log_item(&self, item: T) -> KvResult<()> {
         self.sender.try_send(item).map_err(|e| KvError::LoggingError(e.to_string()))
     }
