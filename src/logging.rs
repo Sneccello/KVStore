@@ -1,22 +1,13 @@
-use tokio::fs::{File, OpenOptions};
+use tokio::fs::OpenOptions;
 use std::marker::PhantomData;
-use std::sync::Arc;
 use csv::WriterBuilder;
 use serde::Serialize;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::{mpsc, Mutex};
-use crate::btree::common::get_unix_nano;
+use tokio::sync::mpsc;
 use crate::errors::{KvError, KvResult};
 
 pub trait Logger<T>: Send + Sync{
     fn log_item(&self, item: T) -> KvResult<()>;
-}
-
-#[derive(Serialize)]
-struct LogRecord<T> {
-    timestamp: u128,
-    #[serde(flatten)]
-    item: T,
 }
 
 pub struct ItemLogger<T> {

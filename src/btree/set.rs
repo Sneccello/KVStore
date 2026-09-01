@@ -1,5 +1,4 @@
-use std::sync::{Arc, RwLock, RwLockWriteGuard};
-use crate::btree::page_managers::page_manager::PageManager;
+use std::sync::RwLockWriteGuard;
 use crate::btree::BTree;
 use crate::btree::btree::OperationType;
 use crate::btree::btree_node::{BTreeNode, StorageMeta};
@@ -66,7 +65,7 @@ impl BTree{
 
     pub fn maybe_split(&self, parent: &mut RwLockWriteGuard<BTreeNode>,
                        child: &mut RwLockWriteGuard<BTreeNode>,
-                       child_idx: usize, key: &[u8], value: &[u8]) -> KvResult<(bool)>{
+                       child_idx: usize, key: &[u8], value: &[u8]) -> KvResult<bool >{
 
 
         if child.is_leaf(){
@@ -156,7 +155,7 @@ impl BTree{
         //    [5]               [3,5]
         //[1,2,3,4,5] [6] -> [1,2] [3,4,5] [6]
 
-        let mut child = child.as_internal_mut();
+        let child = child.as_internal_mut();
         let (promoted_key, new_node) = {
             let n_keys = child.get_keys().len();
 

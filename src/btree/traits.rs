@@ -24,7 +24,7 @@ impl StorageEngine for BTree {
 
 impl std::fmt::Display for BTree {
 
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
         //TODO breaks on last leaves
         let multiplier = 2;
         let dash = "_".repeat(multiplier);
@@ -35,7 +35,7 @@ impl std::fmt::Display for BTree {
         while ! q.is_empty() {
             let (current, depth, is_last_child) = q.pop().unwrap();
             //println!("visiting node {}", current);
-            let mut node_lock = self.page_manager.get_node(current).unwrap();
+            let node_lock = self.page_manager.get_node(current).unwrap();
             let mut node = node_lock.write().unwrap();
 
             if depth == 0 {

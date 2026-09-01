@@ -4,7 +4,6 @@ use crate::btree::BTree;
 use crate::btree::btree::OperationType;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::{PageId};
-use crate::btree::page_managers::page_manager::PageManager;
 use crate::errors::{KvError, KvResult};
 
 impl BTree{
@@ -12,11 +11,11 @@ impl BTree{
     pub fn delete(&self, key: &[u8]) -> KvResult<()> {
         let start = std::time::Instant::now();
         let root_guard = self.root.write().map_err(
-            |e| KvError::LockError()
+            |_e| KvError::LockError()
         )?;
 
         let current_arc = self.page_manager.get_node(*root_guard)?;
-        let current_guard = current_arc.write().map_err(|e| KvError::LockError())?;
+        let current_guard = current_arc.write().map_err(|_e| KvError::LockError())?;
 
         let res = self.recursive_delete(key, *root_guard, current_guard, true, &mut Some(root_guard) );
         self.log_operation(OperationType::Delete, start.elapsed().as_nanos());
@@ -142,7 +141,7 @@ impl BTree{
 
         match &mut **thin_child {
             BTreeNode::Internal(thin_child) => {
-                let mut donor_child = donor_child.as_internal_mut();
+                let donor_child = donor_child.as_internal_mut();
 
                 if donor_is_prev {
                     let parent_key_idx = thin_child_index - 1;

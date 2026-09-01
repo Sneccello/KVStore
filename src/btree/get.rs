@@ -11,7 +11,7 @@ impl BTree{
         let guard = self.root.read().map_err(|_| LockError())?; //TODO guard
         let root_page = *guard;
         let lock = self.page_manager.get_node(root_page)?;
-        let guard = lock.read().map_err(|e| LockError())?;
+        let guard = lock.read().map_err(|_e| LockError())?;
         let res = self.recursive_get(key, guard);
         self.log_operation(OperationType::Get, start.elapsed().as_nanos());
         res
@@ -23,7 +23,7 @@ impl BTree{
             BTreeNode::Internal(node) => {
                 let page = node.route_key_to_child(key);
                 let lock = self.page_manager.get_node(page)?;
-                let guard = lock.read().map_err(|e| LockError())?;
+                let guard = lock.read().map_err(|_e| LockError())?;
                 self.recursive_get(key, guard)
             }
             BTreeNode::Leaf(node) => {

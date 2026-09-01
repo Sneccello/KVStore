@@ -8,7 +8,7 @@ use rand::rngs::ThreadRng;
 use tokio::time::interval;
 use reqwest::{Client, StatusCode};
 use serde::Serialize;
-use kv_store::logging::{ItemLogger, MessageItem};
+use kv_store::logging::ItemLogger;
 use kv_store::logging::Logger;
 
 
@@ -151,9 +151,9 @@ async fn main() {
     let base_url = "http://127.0.0.1:3000/kv";
 
     println!("Loading store..");
-    let (mut keys, mut values) = load_store(base_url, &client, initial_size).await;
+    let (keys, values) = load_store(base_url, &client, initial_size).await;
 
-    let key2index: HashMap<String, usize> = HashMap::from_iter(
+    let _key2index: HashMap<String, usize> = HashMap::from_iter(
         keys.iter().zip(0..keys.len()).map(|(k, v)| (k.clone(), v))
     );
 
@@ -188,7 +188,7 @@ async fn main() {
                         LoadType::WriteDominant => {
                             let idx = rng.gen_range(0..keys.len());
                             let is_read = rng.gen_bool(0.1);
-                            let method = if is_read {Method::Get} else {Method::Put};
+                            let _method = if is_read {Method::Get} else {Method::Put};
                             let method = if is_read {Method::Get} else {Method::Put};
                             let key = keys[idx].clone();
                             let value = if is_read {values[idx].clone()} else {generate_string(&mut rng)};
@@ -219,7 +219,7 @@ async fn main() {
 
                     let url = format!("{}/{}", base_url, key);
 
-                    let current_size = keys.len();
+                    let _current_size = keys.len();
 
                     tokio::spawn(async move {
 

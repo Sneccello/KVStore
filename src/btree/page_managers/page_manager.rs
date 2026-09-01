@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
-use crate::errors::{KvError, KvResult};
+use crate::errors::KvResult;
 
 pub trait PageManager: Send + Sync{
     fn get_node(&self, page: PageId) -> KvResult<Arc<RwLock<BTreeNode>>>;

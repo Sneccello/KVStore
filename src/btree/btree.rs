@@ -4,7 +4,7 @@ use crate::btree::btree_node::{BTreeNode};
 use crate::btree::common::{get_unix_nano, PageId};
 use crate::btree::leaf_node::LeafNode;
 use crate::btree::page_managers::page_manager::PageManager;
-use crate::logging::{ItemLogger, Logger};
+use crate::logging::Logger;
 
 
 #[derive(Serialize)]
