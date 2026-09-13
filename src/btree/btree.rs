@@ -23,14 +23,14 @@ pub struct BTreeLogItem{
 
 pub struct BTree{
     pub root: RwLock<PageId>,
-    pub node_fat_limit_bytes: u16,
-    pub node_thin_limit_bytes: u16, //TODO
+    pub node_fat_limit_bytes: usize,
+    pub node_thin_limit_bytes: usize, //TODO
     pub page_manager: Arc<dyn PageManager>,
     pub logger: Arc<dyn Logger<BTreeLogItem>>
 }
 
 impl BTree{
-    pub fn new(page_manager: Arc<dyn PageManager>, useful_page_size: u16, logger: Arc<dyn Logger<BTreeLogItem>>) -> Self {
+    pub fn new(page_manager: Arc<dyn PageManager>, useful_page_size: usize, logger: Arc<dyn Logger<BTreeLogItem>>) -> Self {
 
         let root = LeafNode::new();
         let root_page = page_manager.alloc_node(BTreeNode::Leaf(root)).unwrap();

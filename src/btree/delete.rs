@@ -1,15 +1,13 @@
 use std::sync::{RwLockWriteGuard};
 
 use crate::btree::BTree;
-use crate::btree::btree::OperationType;
 use crate::btree::btree_node::BTreeNode;
-use crate::btree::common::{PageId};
+use crate::btree::common::{get_unix_nano, PageId};
 use crate::errors::{KvError, KvResult};
 
 impl BTree{
 
-    pub fn delete(&self, key: &[u8]) -> KvResult<()> {
-        let start = std::time::Instant::now();
+    pub async fn delete(&self, key: &[u8]) -> KvResult<()> {
         let root_guard = self.root.write().map_err(
             |_e| KvError::LockError()
         )?;
@@ -17,9 +15,7 @@ impl BTree{
         let current_arc = self.page_manager.get_node(*root_guard)?;
         let current_guard = current_arc.write().map_err(|_e| KvError::LockError())?;
 
-        let res = self.recursive_delete(key, *root_guard, current_guard, true, &mut Some(root_guard) );
-        self.log_operation(OperationType::Delete, start.elapsed().as_nanos());
-        res
+        self.recursive_delete(key, *root_guard, current_guard, true, &mut Some(root_guard))
     }
 
     fn recursive_delete<'a>(&self,

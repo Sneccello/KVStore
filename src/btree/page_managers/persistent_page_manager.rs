@@ -1,11 +1,16 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use async_trait::async_trait;
 use serde::Serialize;
 use tokio::select;
+use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot::Sender;
 use tokio::time::interval;
+use crate::btree::btree::OperationType;
 use crate::logging::Logger;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::{get_unix_nano, PageId};
@@ -26,6 +31,21 @@ struct FlushData{
 }
 
 #[derive(Serialize)]
+pub struct LogicalWalRecord{
+    pub transaction_id: u128,
+    pub operation_type: OperationType,
+    pub key: Vec<u8>,
+    pub value: Vec<u8>, //disregarded for delete for now
+}
+
+type WalMessage = (LogicalWalRecord, oneshot::Sender<KvResult<()>>);
+
+struct WalData{
+    file: BufWriter<File>,
+    changes: Vec<LogicalWalRecord>,
+}
+
+#[derive(Serialize)]
 pub struct PageManagerLogItem {
     start_timestamp_nanos: u128,
     duration: u128,
@@ -34,14 +54,17 @@ pub struct PageManagerLogItem {
 pub struct PersistentPageManager{
     allocator: RwLock<PageAllocatorData>,
     flush_data: RwLock<FlushData>,
-    block_size: u16,
+    block_size: usize,
     data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+    wal_enabled: bool,
+    wal_sender: mpsc::Sender<WalMessage>,
 }
 
 impl PersistentPageManager{
 
-    pub fn new(file_path: &str, block_size: u16,
+    pub fn new(file_path: &str, block_size: usize,
                data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+               wal_enabled: bool,
     ) -> PersistentPageManager {
         let file = OpenOptions::new()
             .read(true)
@@ -50,12 +73,20 @@ impl PersistentPageManager{
             .open(file_path)
             .unwrap();
 
-        PersistentPageManager::new_with_file(file, block_size, data_logger)
+        PersistentPageManager::new_with_file(file, block_size, data_logger, wal_enabled)
     }
 
-    fn new_with_file(file: File, block_size: u16,
+    fn new_with_file(file: File, block_size: usize,
                      data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+                     wal_enabled: bool
     ) -> PersistentPageManager {
+
+
+
+        let (sender, mut receiver) = mpsc::channel::<WalMessage>(10_000);
+        if wal_enabled {
+            Self::spawn_wal_worker(".wal".into(), receiver);
+        }
         Self{
             allocator: RwLock::new(
                 PageAllocatorData{
@@ -70,14 +101,69 @@ impl PersistentPageManager{
             }),
             block_size,
             data_logger,
+            wal_enabled,
+            wal_sender: sender,
         }
     }
 
-    pub fn new_with_temp_file(block_size: u16,
+    fn spawn_wal_worker(path: String, mut receiver: mpsc::Receiver<WalMessage>) {
+        tokio::task::spawn(async move {
+
+            let file = OpenOptions::new().read(true).write(true).create(true).open(&path).unwrap();
+            let mut writer = BufWriter::with_capacity(1024 * 1024, file);
+
+            const MAX_BATCH_SIZE: usize = 1024;
+            let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
+            let mut acks: Vec<Sender<KvResult<()>>> = Vec::with_capacity(MAX_BATCH_SIZE);
+            let mut write_buf = Vec::with_capacity(1024 * 256); //256 kb buffer
+
+            while receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await > 0 {
+                write_buf.clear();
+                acks.clear();
+
+                for (record, ack) in batch.drain(..){
+                    if let Ok(bytes) = bincode::serialize(&record){
+                        let len = bytes.len();
+                        write_buf.extend_from_slice(&len.to_le_bytes());
+                        write_buf.extend_from_slice(&bytes[..]);
+                    }
+                    else{
+                        let _ = ack.send(Err(KvError::IoError("Failed to serialize WAL".into())));
+                    }
+                }
+
+                let sync_result = (|| -> KvResult<()>{
+                    writer.write_all(&write_buf).map_err(|e| KvError::IoError(e.to_string()))?;
+                    writer.flush().map_err(|e| KvError::IoError(e.to_string()))?;
+                    writer.get_ref().sync_data().map_err(|e| KvError::IoError(e.to_string()))?;
+                    Ok(())
+                })();
+
+                match sync_result {
+                    Ok(()) => {
+                        for mut ack in acks.drain(..) {
+                            let _ = ack.send(Ok(()));
+                        }
+                    }
+                    Err(ref err) => {
+                        for mut ack in acks.drain(..) {
+                            let _ = ack.send(Err(KvError::IoError(err.to_string())));
+                        }
+                    }
+                }
+            }
+
+            let _ = writer.flush().map_err(|e| KvError::IoError(e.to_string()));
+            let _ = writer.get_ref().sync_data().map_err(|e| KvError::IoError(e.to_string()));
+        });
+    }
+
+    pub fn new_with_temp_file(block_size: usize,
                               data_logger: Arc<dyn Logger<PageManagerLogItem>>,
+                              wal_enabled: bool,
     ) -> PersistentPageManager {
         let file = tempfile::tempfile().unwrap();
-        PersistentPageManager::new_with_file(file, block_size, data_logger)
+        PersistentPageManager::new_with_file(file, block_size, data_logger, wal_enabled)
     }
 
     fn get_block_offset(&self, page_id: PageId) -> u64{
@@ -85,6 +171,7 @@ impl PersistentPageManager{
     }
 }
 
+#[async_trait]
 impl PageManager for PersistentPageManager{
 
     fn get_node(&self, page: PageId) -> KvResult<Arc<RwLock<BTreeNode>>>{
@@ -180,7 +267,20 @@ impl PageManager for PersistentPageManager{
                 Err(KvError::LockError())
             }
         }
+    }
 
+    async fn add_wal_record(&self, wal_record: LogicalWalRecord) -> KvResult<()>{
+        if !self.wal_enabled{
+            return Ok(())
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.wal_sender
+            .send((wal_record, ack_tx))
+            .await.map_err(
+            |e| KvError::IoError(e.to_string())
+        )?;
+        ack_rx.await.map_err(|e| KvError::IoError(e.to_string()))??;
+        Ok(())
     }
 
 }

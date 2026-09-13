@@ -2,9 +2,10 @@ use std::sync::RwLockWriteGuard;
 use crate::btree::BTree;
 use crate::btree::btree::OperationType;
 use crate::btree::btree_node::{BTreeNode, StorageMeta};
-use crate::btree::common::{PageId};
+use crate::btree::common::{get_unix_nano, PageId};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
+use crate::btree::page_managers::persistent_page_manager::LogicalWalRecord;
 use crate::btree::traits::SerializedSize;
 use crate::errors::KvResult;
 use crate::errors::KvError::{LockError, TreeLogicError};
@@ -12,8 +13,7 @@ use crate::errors::KvError::{LockError, TreeLogicError};
 impl BTree{
 
     
-    pub fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
-        let start = std::time::Instant::now();
+    pub async fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
         let mut root_guard = self.root.write().map_err(|_| LockError())?;
         {
             let node_arc = self.page_manager.get_node(*root_guard)?;
@@ -26,10 +26,7 @@ impl BTree{
         let current_guard = current_arc.write().map_err(|_| LockError())?;
         drop(root_guard);
 
-        let res = self.recursive_set(key, value, current_guard);
-        self.log_operation(OperationType::Set, start.elapsed().as_nanos());
-        res
-        
+        self.recursive_set(key, value, current_guard)
     }
 
     fn recursive_set(&self, key: &[u8], value: &[u8],
@@ -90,7 +87,7 @@ impl BTree{
                 return Ok(true);
             }
         }else{
-            let additional_bytes = key.byte_size() + size_of::<PageId>() as u16;
+            let additional_bytes = key.byte_size() + size_of::<PageId>();
             if additional_bytes + child.total_size_bytes() > self.node_fat_limit_bytes {
                 self.split_internal(parent, child, child_idx)?;
                 return Ok(true)
@@ -120,7 +117,7 @@ impl BTree{
                     }
                 }
                 BTreeNode::Internal(internal) => {
-                    internal.header.total_size_bytes() + key.byte_size() + (size_of::<PageId>() as u16) > self.node_fat_limit_bytes
+                    internal.header.total_size_bytes() + key.byte_size() + size_of::<PageId>() > self.node_fat_limit_bytes
                 }
             };
 
@@ -164,11 +161,11 @@ impl BTree{
             }
 
             let (promoted_key, new_node) = {
-                let mut size = (size_of::<StorageMeta>() + size_of::<PageId>()) as u16;
+                let mut size = size_of::<StorageMeta>() + size_of::<PageId>();
                 let mut index = 0;
                 let child_keys = child.get_keys();
                 while (size < self.node_thin_limit_bytes || index <= 1) && index < n_keys - 1 {
-                    size += child_keys[index].byte_size() + (size_of::<PageId>() as u16);
+                    size += child_keys[index].byte_size() + size_of::<PageId>();
                     index += 1;
                 }
                 let index = index.max(1);
@@ -203,7 +200,7 @@ impl BTree{
             return Err(TreeLogicError("Key-value pair exceeds maximum page size".into()));
         }
         let (promoted_key, new_node) = {
-            let mut size = size_of::<StorageMeta>() as u16;
+            let mut size = size_of::<StorageMeta>();
             let mut index = 0;
             while (size < self.node_thin_limit_bytes || index < 1) && index < keys - 1 {
                 let (key, value) = child.get_key_value_by_index(index);
@@ -235,12 +232,12 @@ mod tests {
     use crate::btree::common::PageId;
     use crate::btree::test_utils::{get_empty_internal_root, get_empty_leaf_root, get_root_page, new_internal, new_leaf};
 
-    #[test]
-    fn test_first_set_in_root() {
+    #[tokio::test]
+    async fn test_first_set_in_root() {
         let mut tree = get_empty_leaf_root(64);
-        tree.set(b"hello", b"world!").unwrap();
+        tree.set(b"hello", b"world!").await.unwrap();
 
-        let root_node = tree.page_manager.get_node(test_utils::get_root_page(&tree)).unwrap();
+        let root_node = tree.page_manager.get_node(get_root_page(&tree)).unwrap();
         let guard = root_node.read().unwrap();
         let root = guard.as_leaf();
 
@@ -250,12 +247,12 @@ mod tests {
         assert_eq!(root.values, vec![b"world!".to_vec()]);
     }
 
-    #[test]
-    fn leaf_root_should_decide_to_split_when_full(){
+    #[tokio::test]
+    async fn leaf_root_should_decide_to_split_when_full(){
         let mut tree = get_empty_leaf_root(64);
 
-        tree.set(b"hi0", b"world").unwrap();
-        tree.set(b"hi1", b"world").unwrap();
+        tree.set(b"hi0", b"world").await.unwrap();
+        tree.set(b"hi1", b"world").await.unwrap();
 
         let root_page = get_root_page(&tree);
         let mut root_guard = tree.root.write().unwrap();

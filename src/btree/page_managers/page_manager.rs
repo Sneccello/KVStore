@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use async_trait::async_trait;
 use crate::btree::btree_node::BTreeNode;
 use crate::btree::common::PageId;
+use crate::btree::page_managers::persistent_page_manager::LogicalWalRecord;
 use crate::errors::KvResult;
 
+#[async_trait]
 pub trait PageManager: Send + Sync{
     fn get_node(&self, page: PageId) -> KvResult<Arc<RwLock<BTreeNode>>>;
     fn alloc_node(&self, node: BTreeNode) ->KvResult<PageId>;
@@ -14,5 +17,8 @@ pub trait PageManager: Send + Sync{
 
     fn sync(&self) -> KvResult<()>;
     fn mark_dirty(&self, page_id: PageId) -> KvResult<()>;
+
+    async fn add_wal_record(&self, wal_record: LogicalWalRecord) -> KvResult<()>;
+
 }
 

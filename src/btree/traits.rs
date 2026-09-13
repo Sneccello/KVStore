@@ -1,20 +1,48 @@
+use async_trait::async_trait;
 use crate::btree::BTree;
+use crate::btree::btree::OperationType;
 use crate::btree::btree_node::BTreeNode;
-use crate::btree::common::PageId;
+use crate::btree::common::{get_unix_nano, PageId};
+use crate::btree::page_managers::persistent_page_manager::LogicalWalRecord;
 use crate::engine::StorageEngine;
 use crate::errors::KvResult;
 
+#[async_trait]
 impl StorageEngine for BTree {
-    fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
-        self.set(key, value)
+    async fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
+        let start = std::time::Instant::now();
+        let transaction_id = get_unix_nano();
+        self.set(key, value).await?;
+        self.page_manager.add_wal_record(
+            LogicalWalRecord{
+                operation_type: OperationType::Delete,
+                transaction_id,
+                key: key.to_vec(),
+                value: value.to_vec(),
+            }
+        ).await?;
+        self.log_operation(OperationType::Set, start.elapsed().as_nanos());
+        Ok(())
     }
 
     fn get(&self, key: &[u8]) -> KvResult<Option<Vec<u8>>> {
         self.get(key)
     }
 
-    fn delete(&self, key: &[u8]) -> KvResult<()> {
-        self.delete(key)
+    async fn delete(&self, key: &[u8]) -> KvResult<()> {
+        let start = std::time::Instant::now();
+        let transaction_id = get_unix_nano();
+        self.delete(key).await?;
+        self.page_manager.add_wal_record(
+            LogicalWalRecord{
+                operation_type: OperationType::Delete,
+                transaction_id,
+                key: key.to_vec(),
+                value: Vec::new(),
+            }
+        ).await?;
+        self.log_operation(OperationType::Delete, start.elapsed().as_nanos());
+        Ok(())
     }
 
     fn sync(&self) -> KvResult<()> {
@@ -80,25 +108,25 @@ impl std::fmt::Display for BTree {
 }
 
 pub trait SerializedSize {
-    fn byte_size(&self) -> u16;
+    fn byte_size(&self) -> usize;
 }
 
 impl SerializedSize for PageId {
-    fn byte_size(&self) -> u16 {
-        size_of::<PageId>() as u16
+    fn byte_size(&self) -> usize {
+        size_of::<PageId>()
     }
 }
 
 impl SerializedSize for Vec<u8> {
-    fn byte_size(&self) -> u16 {
-        (size_of::<u64>() + self.len()) as u16
+    fn byte_size(&self) -> usize {
+        size_of::<u64>() + self.len()
     }
 }
 
 impl SerializedSize for &[u8] {
-    fn byte_size(&self) -> u16 {
+    fn byte_size(&self) -> usize {
         //we say that storing a serialized byte array is the same as storing its length + bytes.
         // similar to vector
-        (size_of::<u64>() + self.len()) as u16
+        (size_of::<u64>() + self.len())
     }
 }

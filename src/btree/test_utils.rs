@@ -9,20 +9,20 @@ use crate::btree::leaf_node::LeafNode;
 use crate::btree::page_managers::persistent_page_manager::{PageManagerLogItem, PersistentPageManager};
 use crate::btree::page_managers::page_manager::PageManager;
 
-pub fn new_persistent_page_manager(page_size: u16) -> Arc<dyn PageManager> {
+pub fn new_persistent_page_manager(page_size: usize) -> Arc<dyn PageManager> {
     //for now we add the prefix so the tests can focus on the useful page size
     // without the additional meta for node size as a prefix
     let data_logger = Arc::new(NoopLogger::<PageManagerLogItem>::new("testlog.log".to_string(), 5));
-    Arc::new(PersistentPageManager::new_with_temp_file(page_size+PAGE_SIZE_PREFIX_BYTES, data_logger))
+    Arc::new(PersistentPageManager::new_with_temp_file(page_size+PAGE_SIZE_PREFIX_BYTES, data_logger, false))
 }
 
-pub fn get_empty_leaf_root(page_size: u16) -> BTree {
+pub fn get_empty_leaf_root(page_size: usize) -> BTree {
     let manager = new_persistent_page_manager(page_size);
     let logger = Arc::new(NoopLogger::<BTreeLogItem>::new("testlog_msgs.log".to_string(), 5));
     BTree::new(manager, page_size, logger)
 }
 
-pub fn get_empty_internal_root(page_size: u16) -> BTree {
+pub fn get_empty_internal_root(page_size: usize) -> BTree {
     let manager = new_persistent_page_manager(page_size);
     let logger = Arc::new(NoopLogger::<BTreeLogItem>::new("testlog_msgs.log".to_string(), 5));
     let tree = BTree::new(manager, page_size, logger);

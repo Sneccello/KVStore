@@ -9,6 +9,7 @@ use std::time::Duration;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::routing::delete;
+use kv_store::benchmark_utils::{DurabilityMode, TestConfig};
 use kv_store::btree::BTree;
 use kv_store::btree::btree::BTreeLogItem;
 use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PageManagerLogItem, PersistentPageManager};
@@ -16,14 +17,6 @@ use kv_store::engine::StorageEngine;
 use kv_store::errors::KvResult;
 use kv_store::logging::{ItemLogger};
 
-pub const LOG_FOLDER: &str = "logs";
-
-#[derive(Clone)]
-enum DurabilityMode {
-    AlwaysSync,
-    NeverSync,
-    PeriodicSync,
-}
 
 #[derive(Clone)]
 struct AppState {
@@ -52,7 +45,7 @@ async fn set_handler(
 ) -> impl IntoResponse {
 
 
-    if let Err(err) = state.engine.set(key.as_bytes(), body.as_bytes()) {
+    if let Err(err) = state.engine.set(key.as_bytes(), body.as_bytes()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
     let post_res = maybe_sync(&state.engine, state.durability_mode);
@@ -81,7 +74,7 @@ async fn delete_handler(
     Path(key): Path<String>,
 ) -> impl IntoResponse {
 
-    if let Err(err) = state.engine.delete(key.as_bytes()) {
+    if let Err(err) = state.engine.delete(key.as_bytes()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
 
@@ -98,20 +91,18 @@ async fn delete_handler(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let durability_mode = DurabilityMode::NeverSync;
+    let config = TestConfig::new("configs/read_heavy_config.yaml");
 
-    let page_size = 4096;
-
-    let pm_log_data_path = std::path::Path::new(LOG_FOLDER).join("page_manager_data.csv");
+    let pm_log_data_path = std::path::Path::new(&config.log_folder).join("page_manager_data.csv");
     let pm_data_path_s = pm_log_data_path.to_str().unwrap();
-    let pm_data_logger = Arc::new(ItemLogger::<PageManagerLogItem>::new(pm_data_path_s, 1_000_0000).await);
+    let pm_data_logger = Arc::new(ItemLogger::<PageManagerLogItem>::new(pm_data_path_s, 100_000).await);
 
 
     let page_manager = Arc::new(
-        PersistentPageManager::new("kv.db", page_size, pm_data_logger)
+        PersistentPageManager::new("kv.db", config.server_config.page_size, pm_data_logger, config.server_config.wal_enabled)
     );
     let pm_copy = page_manager.clone();
-    if let DurabilityMode::PeriodicSync = durability_mode {
+    if let DurabilityMode::PeriodicSync = config.server_config.durability_mode {
         tokio::task::spawn(async move {
             syncing_loop(
                 pm_copy,
@@ -120,15 +111,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let tree_log_data_path = std::path::Path::new(LOG_FOLDER).join("tree_operations.csv");
+    let tree_log_data_path = std::path::Path::new(&config.log_folder).join("tree_operations.csv");
     let tree_data_path_s = tree_log_data_path.to_str().unwrap();
-    let tree_data_logger = Arc::new(ItemLogger::<BTreeLogItem>::new(tree_data_path_s, 1_000_000).await);
-    let tree = BTree::new(page_manager,page_size, tree_data_logger);
+    let tree_data_logger = Arc::new(ItemLogger::<BTreeLogItem>::new(tree_data_path_s, 100_000).await);
+    let tree = BTree::new(page_manager,config.server_config.page_size, tree_data_logger);
 
 
     let state = AppState{
         engine: Arc::new(tree),
-        durability_mode
+        durability_mode: config.server_config.durability_mode
     };
 
     let app = Router::new()

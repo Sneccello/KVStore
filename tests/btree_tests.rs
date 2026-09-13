@@ -3,12 +3,12 @@ mod common;
 use kv_store::errors::KvError;
 use crate::common::utils::{insert_keys_values, new_tree, shuffle};
 
-#[test]
-fn test_btree_insert() {
+#[tokio::test]
+async fn test_btree_insert() {
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").unwrap();
-    tree.set(b"key2", b"value2").unwrap();
+    tree.set(b"key1", b"value1").await.unwrap();
+    tree.set(b"key2", b"value2").await.unwrap();
 
     let res = tree.get(b"key1").unwrap();
     assert_eq!(res, Some(b"value1".to_vec()));
@@ -18,43 +18,43 @@ fn test_btree_insert() {
 }
 
 
-#[test]
-fn test_btree_overwrite(){
+#[tokio::test]
+async fn test_btree_overwrite(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").unwrap();
-    tree.set(b"key1", b"value2").unwrap();
+    tree.set(b"key1", b"value1").await.unwrap();
+    tree.set(b"key1", b"value2").await.unwrap();
 
     let res = tree.get(b"key1").unwrap();
     assert_eq!(res, Some(b"value2".to_vec()));
 }
 
-#[test]
-fn test_btree_delete(){
+#[tokio::test]
+async fn test_btree_delete(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").unwrap();
-    tree.delete(b"key1").unwrap();
+    tree.set(b"key1", b"value1").await.unwrap();
+    tree.delete(b"key1").await.unwrap();
 
     let res = tree.get(b"key1").unwrap();
 
     assert_eq!(res, None);
 }
 
-#[test]
-fn test_btree_delete_non_existing(){
+#[tokio::test]
+async fn test_btree_delete_non_existing(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").unwrap();
-    tree.delete(b"key1").unwrap();
+    tree.set(b"key1", b"value1").await.unwrap();
+    tree.delete(b"key1").await.unwrap();
 
-    let res = tree.delete(b"key1");
+    let res = tree.delete(b"key1").await;
     assert!(matches!(
         res,
         Err(KvError::KeyNotFound(ref k)) if k == b"key1"
     ));
 
-    let res = tree.delete(b"key2");
+    let res = tree.delete(b"key2").await;
     assert!(matches!(
         res,
         Err(KvError::KeyNotFound(ref k)) if k == b"key2"
@@ -62,15 +62,15 @@ fn test_btree_delete_non_existing(){
 }
 
 
-#[test]
-fn test_btree_delete_interleaved(){
+#[tokio::test]
+async fn test_btree_delete_interleaved(){
     let mut tree = new_tree(96);
 
     let items = 100;
     let keys = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
     println!("inserting {items} values");
-    insert_keys_values(&mut tree, &keys, &values);
+    insert_keys_values(&mut tree, &keys, &values).await;
 
     for index in (0..items).step_by(2) {
         println!("getting {:?}", &keys[index]);
@@ -79,7 +79,7 @@ fn test_btree_delete_interleaved(){
         assert_eq!(res, Some(values[index].to_vec()));
 
         println!("deleting {:?}", &keys[index]);
-        tree.delete(&keys[index]).unwrap();
+        tree.delete(&keys[index]).await.unwrap();
         let res = tree.get(&keys[index]).unwrap();
         assert_eq!(res, None)
     }
@@ -91,8 +91,8 @@ fn test_btree_delete_interleaved(){
     }
 }
 
-#[test]
-fn test_btree_delete_reversed(){
+#[tokio::test]
+async fn test_btree_delete_reversed(){
     let mut tree = new_tree(96);
 
     let items = 100;
@@ -102,14 +102,14 @@ fn test_btree_delete_reversed(){
 
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
 
-    insert_keys_values(&mut tree, &keys, &values);
+    insert_keys_values(&mut tree, &keys, &values).await;
 
     for index in (0..items).step_by(2) {
         let rev_index = items - 1 - index;
         let res = tree.get(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
 
-        tree.delete(&keys[rev_index]).unwrap();
+        tree.delete(&keys[rev_index]).await.unwrap();
         let res = tree.get(&keys[rev_index]).unwrap();
         assert_eq!(res, None)
     }
@@ -121,8 +121,8 @@ fn test_btree_delete_reversed(){
         assert_eq!(res, Some(values[rev_index].to_vec()));
     }
 }
-#[test]
-fn test_btree_delete_random(){
+#[tokio::test]
+async fn test_btree_delete_random(){
     let mut tree = new_tree(96);
 
     let items = 100;
@@ -135,14 +135,14 @@ fn test_btree_delete_random(){
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
 
 
-    insert_keys_values(&mut tree, &keys, &values);
+    insert_keys_values(&mut tree, &keys, &values).await;
 
     for index in (0..items).step_by(2) {
         let rev_index = items - 1 - index;
         let res = tree.get(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
 
-        tree.delete(&keys[rev_index]).unwrap();
+        tree.delete(&keys[rev_index]).await.unwrap();
         let res = tree.get(&keys[rev_index]).unwrap();
         assert_eq!(res, None)
     }
@@ -154,8 +154,8 @@ fn test_btree_delete_random(){
     }
 }
 
-#[test]
-fn test_btree_set_a_lot(){
+#[tokio::test]
+async fn test_btree_set_a_lot(){
     let mut tree = new_tree(96);
 
     let items = 100;
@@ -168,7 +168,7 @@ fn test_btree_set_a_lot(){
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
 
     for (key, value) in keys.iter().zip(values.iter()) {
-        tree.set(key, value).unwrap();
+        tree.set(key, value).await.unwrap();
     }
 
     for (key, value) in keys.iter().zip(values.iter()) {
@@ -177,8 +177,8 @@ fn test_btree_set_a_lot(){
     }
 }
 
-#[test]
-fn test_btree_delete_a_lot(){
+#[tokio::test]
+async fn test_btree_delete_a_lot(){
     let mut tree = new_tree(96);
 
     let items = 100;
@@ -190,10 +190,10 @@ fn test_btree_delete_a_lot(){
 
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
 
-    insert_keys_values(&mut tree, &keys, &values);
+    insert_keys_values(&mut tree, &keys, &values).await;
 
     for key in keys.iter() {
-        tree.delete(key).unwrap();
+        tree.delete(key).await.unwrap();
     }
 
     for key in keys.iter() {

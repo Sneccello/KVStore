@@ -24,11 +24,10 @@ impl StorageMeta{
         }
     }
 
-    pub fn total_size_bytes(&self) -> u16 {
-
-        self.items_total_size
+    pub fn total_size_bytes(&self) -> usize {
+        (self.items_total_size
             + self.keys_total_size
-            + (size_of::<StorageMeta>() as u16)
+            + (size_of::<StorageMeta>() as u16)) as usize
     }
 }
 
@@ -40,7 +39,7 @@ pub enum BTreeNode {
 
 impl BTreeNode{
 
-    pub fn total_size_bytes(&self) -> u16{
+    pub fn total_size_bytes(&self) -> usize{
         match self {
             BTreeNode::Internal(node) => {
                 node.header.total_size_bytes()

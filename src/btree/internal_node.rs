@@ -73,13 +73,13 @@ impl InternalNode{
 
     pub fn push_child(&mut self, page_id: PageId) {
         self.children.push(page_id);
-        self.header.items_total_size += page_id.byte_size();
+        self.header.items_total_size += page_id.byte_size() as u16;
     }
 
 
     pub fn pop_last_key(&mut self) -> Vec<u8>{
         let key = self.keys.pop().unwrap();
-        self.header.keys_total_size -= key.byte_size();
+        self.header.keys_total_size -= key.byte_size() as u16;
         key
     }
 
@@ -90,8 +90,8 @@ impl InternalNode{
         let key_len = key.byte_size();
         self.keys.insert(key_index, key);
         self.children.insert(child_index, child);
-        self.header.keys_total_size += key_len;
-        self.header.items_total_size += child.byte_size();
+        self.header.keys_total_size += key_len as u16;
+        self.header.items_total_size += child.byte_size() as u16;
     }
 
     pub fn remove_key_child(&mut self, key_index: usize, child_index: usize) -> (Vec<u8>, PageId) {
@@ -100,8 +100,8 @@ impl InternalNode{
         }
         let key = self.keys.remove(key_index);
         let child = self.children.remove(child_index);
-        self.header.keys_total_size -= key.byte_size();
-        self.header.items_total_size -= child.byte_size();
+        self.header.keys_total_size -= key.byte_size() as u16;
+        self.header.items_total_size -= child.byte_size() as u16;
         (key, child)
     }
 
@@ -136,9 +136,9 @@ impl InternalNode{
         let size = key.byte_size();
         let old_key = std::mem::replace(&mut self.keys[index],key);
         if size >= old_key.byte_size() {
-            self.header.keys_total_size += size - old_key.byte_size();
+            self.header.keys_total_size += (size - old_key.byte_size()) as u16;
         } else {
-            self.header.keys_total_size -= old_key.byte_size() - size;
+            self.header.keys_total_size -= (old_key.byte_size() - size) as u16;
         }
     }
 
@@ -146,9 +146,9 @@ impl InternalNode{
         let size = value.byte_size();
         let old_value = std::mem::replace(&mut self.children[index], value);
         if size >= old_value.byte_size() {
-            self.header.items_total_size += size - old_value.byte_size();
+            self.header.items_total_size += (size - old_value.byte_size()) as u16;
         } else {
-            self.header.items_total_size -= old_value.byte_size() - size;
+            self.header.items_total_size -= (old_value.byte_size() - size) as u16;
         }
     }
 

@@ -32,9 +32,9 @@ impl LeafNode{
                 let old_value = std::mem::replace(&mut self.values[idx], value.to_vec());
                 let old_size = old_value.byte_size();
                 if new_size >= old_size {
-                    self.header.items_total_size += new_size - old_size;
+                    self.header.items_total_size += (new_size - old_size) as u16;
                 } else {
-                    self.header.items_total_size -= old_size - new_size;
+                    self.header.items_total_size -= (old_size - new_size) as u16;
                 }
             },
             Err(idx) => {
@@ -103,8 +103,8 @@ impl LeafNode{
             panic!("Cannot insert value with a key that is not theirs")
         }
 
-        self.header.keys_total_size += key.byte_size();
-        self.header.items_total_size += value.byte_size();
+        self.header.keys_total_size += key.byte_size() as u16;
+        self.header.items_total_size += value.byte_size() as u16;
         self.keys.insert(key_index, key);
         self.values.insert(value_index, value);
     }
@@ -115,8 +115,8 @@ impl LeafNode{
 
         let key = self.keys.remove(key_index);
         let value = self.values.remove(value_index);
-        self.header.keys_total_size -= key.byte_size();
-        self.header.items_total_size -= value.byte_size();
+        self.header.keys_total_size -= key.byte_size() as u16;
+        self.header.items_total_size -= value.byte_size() as u16;
         (key, value)
     }
 
