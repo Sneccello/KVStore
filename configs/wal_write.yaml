@@ -1,4 +1,4 @@
-log_folder: "experiment_data/wal_write_dominant"
+log_folder: "experiment_data/wal_write"
 
 server_config:
   initial_size: 1000000
