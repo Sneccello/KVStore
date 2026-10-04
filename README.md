@@ -6,6 +6,20 @@ Operations:
 - Delete key
 
 
+How to run:
+```
+cargo run --bin server
+```
+
+```
+curl -X PUT http://127.0.0.1:3000/kv/my_key -d "my_value"   #-> 200 OK
+curl -X GET 127.0.0.1:3000/kv/mykey                         #-> 200 OK("my_value")
+curl -X DELETE  127.0.0.1:3000/kv/mykey                     #-> 200 OK
+curl -X GET 127.0.0.1:3000/kv/mykey                         #-> 404 NotFound("my_key")
+```
+
+About:
+
 The tree itself is fully thread-safe, uses RWLocks on each node for multithreading.
 It provides durability with a Write-ahead log (WAL) which persists the put and deleted data before returning from the operation to the client. WAL entry writes are batched to support higher traffic. 
 
