@@ -14,7 +14,7 @@ use kv_store::btree::BTree;
 use kv_store::btree::btree::BTreeLogItem;
 use kv_store::btree::page_managers::persistent_page_manager::{syncing_loop, PageManagerLogItem, PersistentPageManager};
 use kv_store::engine::StorageEngine;
-use kv_store::errors::KvResult;
+use kv_store::errors::{KvError, KvResult};
 use kv_store::logging::{ItemLogger};
 
 
@@ -74,8 +74,8 @@ async fn delete_handler(
     Path(key): Path<String>,
 ) -> impl IntoResponse {
 
-    if let Err(err) = state.engine.delete(key.as_bytes()).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+    if let Err(KvError::KeyNotFound(key)) = state.engine.delete(key.as_bytes()).await {
+        return (StatusCode::NOT_FOUND, String::from_utf8_lossy(&key).to_string());
     }
 
     let post_res = maybe_sync(&state.engine, state.durability_mode);
