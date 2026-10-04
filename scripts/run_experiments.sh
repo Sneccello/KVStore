@@ -7,10 +7,10 @@ cargo build --release --bin mem_bench
 mkdir -p experiment_data
 
 configs=(
-    "configs/exp_no_wal_read.yaml"
-    "configs/exp_no_wal_write.yaml"
-    "configs/exp_wal_read.yaml"
-    "configs/exp_wal_write.yaml"
+    "configs/no_wal_read.yaml"
+    "configs/no_wal_write.yaml"
+    "configs/wal_read.yaml"
+    "configs/wal_write.yaml"
 )
 
 for cfg in "${configs[@]}"; do

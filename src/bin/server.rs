@@ -91,7 +91,7 @@ async fn delete_handler(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let config = TestConfig::new("configs/read_heavy_config.yaml");
+    let config = TestConfig::new("configs/wal_write.yaml");
 
     let pm_log_data_path = std::path::Path::new(&config.log_folder).join("page_manager_data.csv");
     let pm_data_path_s = pm_log_data_path.to_str().unwrap();

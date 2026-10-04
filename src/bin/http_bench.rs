@@ -40,7 +40,7 @@ async fn load_store(base_url: &str, client: &Client, size: usize) -> (Vec<String
 
 #[tokio::main]
 async fn main() {
-    let config = TestConfig::new("configs/read_heavy_config.yaml");
+    let config = TestConfig::new("configs/wal_write.yaml");
 
 
     let get_log_path = std::path::Path::new(LOG_FOLDER).join("client_get_summary.csv");

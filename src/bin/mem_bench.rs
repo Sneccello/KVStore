@@ -93,7 +93,7 @@ async fn load_store(tree: &BTree, size: usize) -> (Vec<String>, Vec<String>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = std::env::args().nth(1).unwrap_or_else(|| "configs/read_heavy_config.yaml".to_string());
+    let config_path = std::env::args().nth(1).unwrap_or_else(|| "configs/wal_write.yaml".to_string());
     let config = TestConfig::new(&config_path);
     const NUM_WORKERS: usize = 1024;
 
