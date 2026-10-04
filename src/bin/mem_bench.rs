@@ -95,7 +95,7 @@ async fn load_store(tree: &BTree, size: usize) -> (Vec<String>, Vec<String>) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::env::args().nth(1).unwrap_or_else(|| "configs/read_heavy_config.yaml".to_string());
     let config = TestConfig::new(&config_path);
-    const NUM_WORKERS: usize = 512;
+    const NUM_WORKERS: usize = 1024;
 
     let log_folder = &config.log_folder;
     std::fs::create_dir_all(log_folder).ok();
