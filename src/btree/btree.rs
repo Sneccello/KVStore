@@ -44,7 +44,7 @@ impl BTree{
     }
 
     pub(crate) fn log_operation(&self, operation_type: OperationType, duration: u128){
-        
+        return;//TODO WAL is similar and this needs optimizing
         self.logger.log_item(
             BTreeLogItem{
                 operation_type,

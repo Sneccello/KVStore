@@ -1,0 +1,13 @@
+log_folder: "experiment_data/wal_write_dominant"
+
+server_config:
+  initial_size: 1000000
+  page_size: 4096
+  wal_enabled: true
+  durability_mode: "NeverSync"
+
+client_config:
+  qps_increment: 25000
+  max_qps: 300000
+  qps_tier_duration: 15
+  load_type: "WriteDominant"

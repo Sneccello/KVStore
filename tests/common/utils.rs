@@ -7,7 +7,7 @@ use kv_store::logging::NoopLogger;
 pub async fn insert_keys_values(tree: &mut BTree, keys: &Vec<Vec<u8>>, values: &Vec<Vec<u8>>) {
 
     for (key, value) in keys.iter().zip(values.iter()){
-        tree.set(&key, &value).await.unwrap();
+        tree.set_operation(&key, &value).await.unwrap();
     }
 }
 

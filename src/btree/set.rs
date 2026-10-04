@@ -1,11 +1,9 @@
 use std::sync::RwLockWriteGuard;
 use crate::btree::BTree;
-use crate::btree::btree::OperationType;
 use crate::btree::btree_node::{BTreeNode, StorageMeta};
-use crate::btree::common::{get_unix_nano, PageId};
+use crate::btree::common::{PageId};
 use crate::btree::internal_node::InternalNode;
 use crate::btree::leaf_node::LeafNode;
-use crate::btree::page_managers::persistent_page_manager::LogicalWalRecord;
 use crate::btree::traits::SerializedSize;
 use crate::errors::KvResult;
 use crate::errors::KvError::{LockError, TreeLogicError};
@@ -13,7 +11,7 @@ use crate::errors::KvError::{LockError, TreeLogicError};
 impl BTree{
 
     
-    pub async fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
+    pub async fn set_operation(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
         let mut root_guard = self.root.write().map_err(|_| LockError())?;
         {
             let node_arc = self.page_manager.get_node(*root_guard)?;
@@ -235,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_first_set_in_root() {
         let mut tree = get_empty_leaf_root(64);
-        tree.set(b"hello", b"world!").await.unwrap();
+        tree.set_operation(b"hello", b"world!").await.unwrap();
 
         let root_node = tree.page_manager.get_node(get_root_page(&tree)).unwrap();
         let guard = root_node.read().unwrap();
@@ -251,8 +249,8 @@ mod tests {
     async fn leaf_root_should_decide_to_split_when_full(){
         let mut tree = get_empty_leaf_root(64);
 
-        tree.set(b"hi0", b"world").await.unwrap();
-        tree.set(b"hi1", b"world").await.unwrap();
+        tree.set_operation(b"hi0", b"world").await.unwrap();
+        tree.set_operation(b"hi1", b"world").await.unwrap();
 
         let root_page = get_root_page(&tree);
         let mut root_guard = tree.root.write().unwrap();

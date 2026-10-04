@@ -1,10 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use futures::stream::{self, StreamExt};
-use rand::Rng;
+use rand::prelude::StdRng;
+use rand::{SeedableRng};
 use tokio::time::interval;
-use reqwest::{Client, StatusCode};
-use kv_store::benchmark_utils::{generate_key_values, generate_string, LatencyCollector, LoadType, Method, MethodSummary, TestConfig, LOG_FOLDER};
+use reqwest::Client;
+use kv_store::benchmark_utils::{generate_key_values, next_operation, LatencyCollector, Method, MethodSummary, TestConfig, LOG_FOLDER};
 use kv_store::logging::{ItemLogger, Logger};
 
 async fn timed_request(url: String, value: String, method: Method, client: &Client) -> u64 {
@@ -41,7 +42,7 @@ async fn load_store(base_url: &str, client: &Client, size: usize) -> (Vec<String
 async fn main() {
     let config = TestConfig::new("configs/read_heavy_config.yaml");
 
-    // 3 dedicated summary loggers for HTTP Client Get, Put, and Delete
+
     let get_log_path = std::path::Path::new(LOG_FOLDER).join("client_get_summary.csv");
     let get_logger = Arc::new(ItemLogger::<MethodSummary>::new(get_log_path.to_str().unwrap(), 10_000).await);
 
@@ -56,11 +57,11 @@ async fn main() {
     let base_url = "http://127.0.0.1:3000/kv";
 
     println!("Loading store with {} keys...", config.server_config.initial_size);
-    let (keys, values) = load_store(base_url, &client, config.server_config.initial_size).await;
+    let (mut keys, mut values) = load_store(base_url, &client, config.server_config.initial_size).await;
     println!("Loading store DONE");
 
     let mut current_qps: u64 = 1;
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
 
     loop {
         let interval_duration = Duration::from_secs_f64(1.0 / current_qps as f64);
@@ -73,54 +74,18 @@ async fn main() {
                     let client_clone = client.clone();
                     let collector_clone = collector.clone();
 
-                    let (method, key, value) = match config.client_config.load_type {
-                        LoadType::ReadDominant => {
-                            let idx = rng.gen_range(0..keys.len());
-                            let is_read = rng.gen_bool(0.9);
-                            let method = if is_read { Method::Get } else { Method::Put };
-                            let key = keys[idx].clone();
-                            let value = if is_read { values[idx].clone() } else { generate_string(&mut rng) };
-                            (method, key, value)
-                        },
-                        LoadType::WriteDominant => {
-                            let idx = rng.gen_range(0..keys.len());
-                            let is_read = rng.gen_bool(0.1);
-                            let method = if is_read { Method::Get } else { Method::Put };
-                            let key = keys[idx].clone();
-                            let value = if is_read { values[idx].clone() } else { generate_string(&mut rng) };
-                            (method, key, value)
-                        },
-                        LoadType::Balanced => {
-                            let idx = rng.gen_range(0..keys.len());
-                            let is_read = rng.gen_bool(0.1);
-                            let write_is_delete = rng.gen_bool(0.5);
-                            if is_read {
-                                let key = keys[idx].clone();
-                                let value = values[idx].clone();
-                                (Method::Get, key, value)
-                            } else if write_is_delete {
-                                let key = keys[idx].clone();
-                                let value = values[idx].clone();
-                                (Method::Delete, key, value)
-                            } else {
-                                let key = keys[idx].clone();
-                                let new_value = generate_string(&mut rng);
-                                (Method::Put, key, new_value)
-                            }
-                        }
-                    };
+                    let (method, key, value) = next_operation(&mut rng, &mut keys, &mut values, config.client_config.load_type);
 
                     let url = format!("{}/{}", base_url, key);
 
                     tokio::spawn(async move {
                         let duration_ns = timed_request(url, value, method, &client_clone).await;
-                        collector_clone.record(&method, duration_ns);
+                        collector_clone.record(&method, duration_ns, duration_ns);
                     });
                 }
             }
         }
 
-        // Flush and log 1 summary row per method at the end of the tier
         let (get_sum, put_sum, del_sum) = collector.flush_and_reset(current_qps);
         if let Some(s) = get_sum { get_logger.log_item(s).unwrap(); }
         if let Some(s) = put_sum { put_logger.log_item(s).unwrap(); }

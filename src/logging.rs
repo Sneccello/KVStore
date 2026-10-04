@@ -53,8 +53,9 @@ impl <T: Serialize+Send+'static> ItemLogger<T> { //TODO refactor
 
                 has_written_headers = true;
                 let _ = writer.write_all(&write_buf).await;
+                let _ = writer.flush().await;
             }
-            let _ = writer.flush();
+            let _ = writer.flush().await;
         });
 
         Self{sender}

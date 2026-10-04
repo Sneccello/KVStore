@@ -7,13 +7,13 @@ use crate::common::utils::{insert_keys_values, new_tree, shuffle};
 async fn test_btree_insert() {
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").await.unwrap();
-    tree.set(b"key2", b"value2").await.unwrap();
+    tree.set_operation(b"key1", b"value1").await.unwrap();
+    tree.set_operation(b"key2", b"value2").await.unwrap();
 
-    let res = tree.get(b"key1").unwrap();
+    let res = tree.get_operation(b"key1").unwrap();
     assert_eq!(res, Some(b"value1".to_vec()));
 
-    let res = tree.get(b"key2").unwrap();
+    let res = tree.get_operation(b"key2").unwrap();
     assert_eq!(res, Some(b"value2".to_vec()));
 }
 
@@ -22,10 +22,10 @@ async fn test_btree_insert() {
 async fn test_btree_overwrite(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").await.unwrap();
-    tree.set(b"key1", b"value2").await.unwrap();
+    tree.set_operation(b"key1", b"value1").await.unwrap();
+    tree.set_operation(b"key1", b"value2").await.unwrap();
 
-    let res = tree.get(b"key1").unwrap();
+    let res = tree.get_operation(b"key1").unwrap();
     assert_eq!(res, Some(b"value2".to_vec()));
 }
 
@@ -33,10 +33,10 @@ async fn test_btree_overwrite(){
 async fn test_btree_delete(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").await.unwrap();
-    tree.delete(b"key1").await.unwrap();
+    tree.set_operation(b"key1", b"value1").await.unwrap();
+    tree.delete_operation(b"key1").await.unwrap();
 
-    let res = tree.get(b"key1").unwrap();
+    let res = tree.get_operation(b"key1").unwrap();
 
     assert_eq!(res, None);
 }
@@ -45,16 +45,16 @@ async fn test_btree_delete(){
 async fn test_btree_delete_non_existing(){
     let mut tree = new_tree(96);
 
-    tree.set(b"key1", b"value1").await.unwrap();
-    tree.delete(b"key1").await.unwrap();
+    tree.set_operation(b"key1", b"value1").await.unwrap();
+    tree.delete_operation(b"key1").await.unwrap();
 
-    let res = tree.delete(b"key1").await;
+    let res = tree.delete_operation(b"key1").await;
     assert!(matches!(
         res,
         Err(KvError::KeyNotFound(ref k)) if k == b"key1"
     ));
 
-    let res = tree.delete(b"key2").await;
+    let res = tree.delete_operation(b"key2").await;
     assert!(matches!(
         res,
         Err(KvError::KeyNotFound(ref k)) if k == b"key2"
@@ -74,18 +74,18 @@ async fn test_btree_delete_interleaved(){
 
     for index in (0..items).step_by(2) {
         println!("getting {:?}", &keys[index]);
-        let res = tree.get(&keys[index]).unwrap();
+        let res = tree.get_operation(&keys[index]).unwrap();
         println!("got {:?}", res);
         assert_eq!(res, Some(values[index].to_vec()));
 
         println!("deleting {:?}", &keys[index]);
-        tree.delete(&keys[index]).await.unwrap();
-        let res = tree.get(&keys[index]).unwrap();
+        tree.delete_operation(&keys[index]).await.unwrap();
+        let res = tree.get_operation(&keys[index]).unwrap();
         assert_eq!(res, None)
     }
     for index in (1..items).step_by(2) {
         println!("re-getting {:?}", &keys[index]);
-        let res = tree.get(&keys[index]).unwrap();
+        let res = tree.get_operation(&keys[index]).unwrap();
         assert_eq!(res, Some(values[index].to_vec()));
 
     }
@@ -106,18 +106,18 @@ async fn test_btree_delete_reversed(){
 
     for index in (0..items).step_by(2) {
         let rev_index = items - 1 - index;
-        let res = tree.get(&keys[rev_index]).unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
 
-        tree.delete(&keys[rev_index]).await.unwrap();
-        let res = tree.get(&keys[rev_index]).unwrap();
+        tree.delete_operation(&keys[rev_index]).await.unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, None)
     }
     println!("{:?}", keys);
     println!("{:?}", values);
     for index in (1..items).step_by(2) {
         let rev_index = items - 1 - index;
-        let res = tree.get(&keys[rev_index]).unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
     }
 }
@@ -139,17 +139,17 @@ async fn test_btree_delete_random(){
 
     for index in (0..items).step_by(2) {
         let rev_index = items - 1 - index;
-        let res = tree.get(&keys[rev_index]).unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
 
-        tree.delete(&keys[rev_index]).await.unwrap();
-        let res = tree.get(&keys[rev_index]).unwrap();
+        tree.delete_operation(&keys[rev_index]).await.unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, None)
     }
 
     for index in (1..items).step_by(2) {
         let rev_index = items - 1 - index;
-        let res = tree.get(&keys[rev_index]).unwrap();
+        let res = tree.get_operation(&keys[rev_index]).unwrap();
         assert_eq!(res, Some(values[rev_index].to_vec()));
     }
 }
@@ -168,11 +168,11 @@ async fn test_btree_set_a_lot(){
     let values = (0..items).map(|i| i.to_string().into_bytes()).collect::<Vec<_>>();
 
     for (key, value) in keys.iter().zip(values.iter()) {
-        tree.set(key, value).await.unwrap();
+        tree.set_operation(key, value).await.unwrap();
     }
 
     for (key, value) in keys.iter().zip(values.iter()) {
-        let got_value = tree.get(key).unwrap();
+        let got_value = tree.get_operation(key).unwrap();
         assert_eq!(value, &got_value.unwrap());
     }
 }
@@ -193,11 +193,11 @@ async fn test_btree_delete_a_lot(){
     insert_keys_values(&mut tree, &keys, &values).await;
 
     for key in keys.iter() {
-        tree.delete(key).await.unwrap();
+        tree.delete_operation(key).await.unwrap();
     }
 
     for key in keys.iter() {
-        let got_value = tree.get(key).unwrap();
+        let got_value = tree.get_operation(key).unwrap();
         assert_eq!(None, got_value);
     }
 }

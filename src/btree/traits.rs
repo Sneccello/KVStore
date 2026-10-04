@@ -12,7 +12,7 @@ impl StorageEngine for BTree {
     async fn set(&self, key: &[u8], value: &[u8]) -> KvResult<()> {
         let start = std::time::Instant::now();
         let transaction_id = get_unix_nano();
-        self.set(key, value).await?;
+        self.set_operation(key, value).await?;
         self.page_manager.add_wal_record(
             LogicalWalRecord{
                 operation_type: OperationType::Delete,
@@ -26,13 +26,13 @@ impl StorageEngine for BTree {
     }
 
     fn get(&self, key: &[u8]) -> KvResult<Option<Vec<u8>>> {
-        self.get(key)
+        self.get_operation(key)
     }
 
     async fn delete(&self, key: &[u8]) -> KvResult<()> {
         let start = std::time::Instant::now();
         let transaction_id = get_unix_nano();
-        self.delete(key).await?;
+        self.delete_operation(key).await?;
         self.page_manager.add_wal_record(
             LogicalWalRecord{
                 operation_type: OperationType::Delete,
@@ -127,6 +127,6 @@ impl SerializedSize for &[u8] {
     fn byte_size(&self) -> usize {
         //we say that storing a serialized byte array is the same as storing its length + bytes.
         // similar to vector
-        (size_of::<u64>() + self.len())
+        size_of::<u64>() + self.len()
     }
 }

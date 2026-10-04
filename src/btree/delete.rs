@@ -2,12 +2,12 @@ use std::sync::{RwLockWriteGuard};
 
 use crate::btree::BTree;
 use crate::btree::btree_node::BTreeNode;
-use crate::btree::common::{get_unix_nano, PageId};
+use crate::btree::common::{PageId};
 use crate::errors::{KvError, KvResult};
 
 impl BTree{
 
-    pub async fn delete(&self, key: &[u8]) -> KvResult<()> {
+    pub async fn delete_operation(&self, key: &[u8]) -> KvResult<()> {
         let root_guard = self.root.write().map_err(
             |_e| KvError::LockError()
         )?;

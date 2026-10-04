@@ -6,7 +6,7 @@ use crate::errors::KvError::LockError;
 use crate::errors::KvResult;
 
 impl BTree{
-    pub fn get(&self, key: &[u8]) -> KvResult<Option<Vec<u8>>> {
+    pub fn get_operation(&self, key: &[u8]) -> KvResult<Option<Vec<u8>>> {
         let start = std::time::Instant::now();
         let guard = self.root.read().map_err(|_| LockError())?; //TODO guard
         let root_page = *guard;

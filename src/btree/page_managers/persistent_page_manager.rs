@@ -38,12 +38,7 @@ pub struct LogicalWalRecord{
     pub value: Vec<u8>, //disregarded for delete for now
 }
 
-type WalMessage = (LogicalWalRecord, oneshot::Sender<KvResult<()>>);
-
-struct WalData{
-    file: BufWriter<File>,
-    changes: Vec<LogicalWalRecord>,
-}
+type WalMessage = (Vec<u8>, Sender<KvResult<()>>);
 
 #[derive(Serialize)]
 pub struct PageManagerLogItem {
@@ -83,7 +78,7 @@ impl PersistentPageManager{
 
 
 
-        let (sender, mut receiver) = mpsc::channel::<WalMessage>(10_000);
+        let (sender, receiver) = mpsc::channel::<WalMessage>(10_000);
         if wal_enabled {
             Self::spawn_wal_worker(".wal".into(), receiver);
         }
@@ -107,55 +102,102 @@ impl PersistentPageManager{
     }
 
     fn spawn_wal_worker(path: String, mut receiver: mpsc::Receiver<WalMessage>) {
-        tokio::task::spawn(async move {
+        std::thread::Builder::new().name("wal-flusher".into()).spawn( move || {
 
             let file = OpenOptions::new().read(true).write(true).create(true).open(&path).unwrap();
+
+            const CHUNK_SIZE: u64 = 64 * 1024 * 1024;
+            let mut allocated_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+            if allocated_size < CHUNK_SIZE {
+                allocated_size = CHUNK_SIZE;
+                let _ = file.set_len(allocated_size);
+            }
+
             let mut writer = BufWriter::with_capacity(1024 * 1024, file);
 
             const MAX_BATCH_SIZE: usize = 1024;
             let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
             let mut acks: Vec<Sender<KvResult<()>>> = Vec::with_capacity(MAX_BATCH_SIZE);
             let mut write_buf = Vec::with_capacity(1024 * 256); //256 kb buffer
+            let mut current_file_offset = 0;
+            let mut flush_count: u64 = 0;
+            let mut total_records: u64 = 0;
+            let mut total_write_nanos: u128 = 0;
+            let mut total_sync_nanos: u128 = 0;
+            let mut last_report = std::time::Instant::now();
 
-            while receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await > 0 {
+            while receiver.blocking_recv_many(&mut batch, MAX_BATCH_SIZE) > 0 {
+                let batch_size = batch.len();
                 write_buf.clear();
                 acks.clear();
 
-                for (record, ack) in batch.drain(..){
-                    if let Ok(bytes) = bincode::serialize(&record){
-                        let len = bytes.len();
-                        write_buf.extend_from_slice(&len.to_le_bytes());
-                        write_buf.extend_from_slice(&bytes[..]);
-                    }
-                    else{
-                        let _ = ack.send(Err(KvError::IoError("Failed to serialize WAL".into())));
-                    }
+                for (bytes, ack) in batch.drain(..){
+                    let len = bytes.len();
+                    write_buf.extend_from_slice(&len.to_le_bytes());
+                    write_buf.extend_from_slice(&bytes[..]);
+                    acks.push(ack);
                 }
 
-                let sync_result = (|| -> KvResult<()>{
+                const CHUNK_SIZE: u64 = 64 * 1024 * 1024;
+
+                if current_file_offset + write_buf.len() as u64 > allocated_size {
+                    allocated_size += CHUNK_SIZE;
+                    let _ = writer.get_ref().set_len(allocated_size);
+                }
+                current_file_offset += write_buf.len() as u64;
+
+                let write_start = std::time::Instant::now();
+                let sync_result = (|| -> KvResult<(u128, u128)>{
                     writer.write_all(&write_buf).map_err(|e| KvError::IoError(e.to_string()))?;
                     writer.flush().map_err(|e| KvError::IoError(e.to_string()))?;
+                    let write_done = std::time::Instant::now();
                     writer.get_ref().sync_data().map_err(|e| KvError::IoError(e.to_string()))?;
-                    Ok(())
+                    let sync_done = std::time::Instant::now();
+                    Ok((write_done.duration_since(write_start).as_nanos(), sync_done.duration_since(write_done).as_nanos()))
                 })();
 
                 match sync_result {
-                    Ok(()) => {
-                        for mut ack in acks.drain(..) {
+                    Ok((w_nanos, s_nanos)) => {
+                        flush_count += 1;
+                        total_records += batch_size as u64;
+                        total_write_nanos += w_nanos;
+                        total_sync_nanos += s_nanos;
+
+                        for ack in acks.drain(..) {
                             let _ = ack.send(Ok(()));
                         }
                     }
                     Err(ref err) => {
-                        for mut ack in acks.drain(..) {
+                        for ack in acks.drain(..) {
                             let _ = ack.send(Err(KvError::IoError(err.to_string())));
                         }
                     }
+                }
+
+                if last_report.elapsed() >= std::time::Duration::from_secs(1) {
+                    let elapsed_sec = last_report.elapsed().as_secs_f64();
+                    let flushes_per_sec = flush_count as f64 / elapsed_sec;
+                    let avg_batch = if flush_count > 0 { total_records as f64 / flush_count as f64 } else { 0.0 };
+                    let avg_write_ms = if flush_count > 0 { (total_write_nanos as f64 / flush_count as f64) / 1_000_000.0 } else { 0.0 };
+                    let avg_sync_ms = if flush_count > 0 { (total_sync_nanos as f64 / flush_count as f64) / 1_000_000.0 } else { 0.0 };
+                    let wal_qps = total_records as f64 / elapsed_sec;
+
+                    println!(
+                        "[WAL Monitor] {:.0} flushes/s | avg batch: {:.1} ops | write: {:.2}ms | sync: {:.2}ms | throughput: {:.0} QPS",
+                        flushes_per_sec, avg_batch, avg_write_ms, avg_sync_ms, wal_qps
+                    );
+
+                    flush_count = 0;
+                    total_records = 0;
+                    total_write_nanos = 0;
+                    total_sync_nanos = 0;
+                    last_report = std::time::Instant::now();
                 }
             }
 
             let _ = writer.flush().map_err(|e| KvError::IoError(e.to_string()));
             let _ = writer.get_ref().sync_data().map_err(|e| KvError::IoError(e.to_string()));
-        });
+        }).expect("Failed to spawn wal-flusher thread");
     }
 
     pub fn new_with_temp_file(block_size: usize,
@@ -273,9 +315,11 @@ impl PageManager for PersistentPageManager{
         if !self.wal_enabled{
             return Ok(())
         }
+        let bytes = bincode::serialize(&wal_record).map_err(|e| KvError::IoError(e.to_string()))?;
+
         let (ack_tx, ack_rx) = oneshot::channel();
         self.wal_sender
-            .send((wal_record, ack_tx))
+            .send((bytes, ack_tx))
             .await.map_err(
             |e| KvError::IoError(e.to_string())
         )?;
